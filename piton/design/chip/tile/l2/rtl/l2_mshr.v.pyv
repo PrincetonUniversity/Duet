@@ -251,11 +251,13 @@ for i in range(L2_MSHR_ENTRIES):
         if (pending && pending_ready && (pending_index != wr_index_in))
         begin
             //SMC miss entries are locked in the mshr
+            `ifndef NO_RTL_CSM
             if (data_mem_f[pending_index][`L2_MSHR_SMC_MISS])
             begin
                 state_mem_f[pending_index] <= `L2_MSHR_STATE_WAIT;
             end
             else
+            `endif
             begin
                 state_mem_f[pending_index] <= `L2_MSHR_STATE_INVAL;
             end
@@ -263,11 +265,14 @@ for i in range(L2_MSHR_ENTRIES):
     end
     else if (pending && pending_ready)
     begin
+        
+        `ifndef NO_RTL_CSM
         if (data_mem_f[pending_index][`L2_MSHR_SMC_MISS])
         begin
             state_mem_f[pending_index] <= `L2_MSHR_STATE_WAIT;
         end
         else
+        `endif
         begin
             state_mem_f[pending_index] <= `L2_MSHR_STATE_INVAL;
         end
