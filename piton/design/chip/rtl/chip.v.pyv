@@ -26,6 +26,10 @@
 `include "piton_system.vh"
 `include "jtag.vh"
 
+`ifdef PITON_PRGA
+    `include "prga_rxi.vh"
+    `include "prga_yami.vh"
+`endif
 module chip(
 `ifndef PITON_CHIP_FPGA
    // IO cell configs
@@ -143,18 +147,27 @@ module chip(
     ,
     // Debug
     input                                       ndmreset_i,    // non-debug module reset
-    input   [`PITON_NUM_TILES-1:0]                    debug_req_i,   // async debug request
-    output  [`PITON_NUM_TILES-1:0]                    unavailable_o, // communicate whether the hart is unavailable (e.g.: power down)
+    input   [`PITON_RV64_TILES-1:0]             debug_req_i,   // async debug request
+    output  [`PITON_RV64_TILES-1:0]             unavailable_o, // communicate whether the hart is unavailable (e.g.: power down)
     // CLINT
-    input   [`PITON_NUM_TILES-1:0]                    timer_irq_i,   // Timer interrupts
-    input   [`PITON_NUM_TILES-1:0]                    ipi_i,         // software interrupt (a.k.a inter-process-interrupt)
+    input   [`PITON_RV64_TILES-1:0]             timer_irq_i,   // Timer interrupts
+    input   [`PITON_RV64_TILES-1:0]             ipi_i,         // software interrupt (a.k.a inter-process-interrupt)
     // PLIC
-    input   [`PITON_NUM_TILES*2-1:0]                  irq_i          // level sensitive IR lines, mip & sip (async)
+    input   [`PITON_RV64_TILES*2-1:0]           irq_i          // level sensitive IR lines, mip & sip (async)
 `endif
 );
 
 <%
+    import os
+    import sys
     from pyhplib import *
+
+    # Add pyocn/py to python path
+    if PITON_NETWORK_CONFIG == "pyocn_config" or PITON_NETWORK_CONFIG == "pyocn_router_config":
+        DV_ROOT = os.getenv( 'DV_ROOT' )
+        assert DV_ROOT is not None, "Environment variable DV_ROOT is not defined!"
+        sys.path.insert( 0, os.path.join( DV_ROOT, 'design/chip/pyocn/py' ) )
+        import pyocn_chip_utils
 %>
 
    ///////////////////////
@@ -370,6 +383,13 @@ module chip(
            print("wire [`DATA_WIDTH-1:0] offchip_out_noc%d_data;" % (k))
            print("wire offchip_out_noc%d_valid;" % (k))
            print("wire offchip_out_noc%d_yummy;" % (k))
+
+   elif PITON_NETWORK_CONFIG == "pyocn_config":
+     pyocn_chip_utils.print_tile_noc_wires( PITON_X_TILES, PITON_Y_TILES )
+
+   elif PITON_NETWORK_CONFIG == "pyocn_router_config":
+     pyocn_chip_utils.print_router_tile_wiring( PITON_X_TILES, PITON_Y_TILES )
+
    else:
        for i in range(PITON_X_TILES):
            for j in range(PITON_Y_TILES):
@@ -421,12 +441,9 @@ module chip(
            print("wire dummy_out_W_noc%d_yummy = 1'b0;" % (k))
        # make offchip signals
        for k in [1,2,3]:
-           # print "wire [`DATA_WIDTH-1:0] offchip_out_S_noc%d_data;" % (k)
-           print("wire [`DATA_WIDTH-1:0] offchip_out_E_noc%d_data;" % (k))
-           # print "wire offchip_out_S_noc%d_valid;" % (k)
-           print("wire offchip_out_E_noc%d_valid;" % (k))
-           # print "wire offchip_out_S_noc%d_yummy;" % (k)
-           print("wire offchip_out_E_noc%d_yummy;" % (k))
+           print("wire [`DATA_WIDTH-1:0] offchip_out_S_noc%d_data;" % (k))
+           print("wire offchip_out_S_noc%d_valid;" % (k))
+           print("wire offchip_out_S_noc%d_yummy;" % (k))
 %>
 
    //////////////////////
@@ -518,14 +535,24 @@ module chip(
    // Connecting chip_bridge data to tiles/ORAM
 <%
    s = '''
-   assign proc_oram_valid = tile_0_0_out_W_noc2_valid;
-   assign proc_oram_data = tile_0_0_out_W_noc2_data;
-   assign oram_proc_yummy = tile_0_0_out_W_noc3_yummy;'''
+   assign proc_oram_valid = tile_0_0_out_N_noc2_valid;
+   assign proc_oram_data = tile_0_0_out_N_noc2_data;
+   assign oram_proc_yummy = tile_0_0_out_N_noc3_yummy;'''
    if (PITON_NETWORK_CONFIG == "xbar_config"):
        s = r'''
    assign proc_oram_valid = xbar_X_TILES_out_noc2_valid;
    assign proc_oram_data = xbar_X_TILES_out_noc2_data;
    assign oram_proc_yummy = xbar_X_TILES_out_noc3_yummy;'''
+
+   elif PITON_NETWORK_CONFIG == "pyocn_config":
+       s = pyocn_chip_utils.str_proc_oram()
+
+   elif PITON_NETWORK_CONFIG == "pyocn_router_config":
+       s = '''
+   //---------------------------------------------------------------------
+   // pyocn_router_config - does not need extra wiring here
+   //---------------------------------------------------------------------'''
+
    print(s.replace("X_TILES", str(PITON_X_TILES)))
 %>
    assign offchip_oram_valid = offchip_processor_noc3_valid;
@@ -533,42 +560,62 @@ module chip(
    assign oram_offchip_yummy = processor_offchip_noc2_yummy;
 <%
    s = r'''
-   assign processor_offchip_noc1_valid = tile_0_0_out_W_noc1_valid;
-   assign processor_offchip_noc1_data = tile_0_0_out_W_noc1_data;
-   assign offchip_processor_noc1_yummy = tile_0_0_out_W_noc1_yummy;'''
+   assign processor_offchip_noc1_valid = tile_0_0_out_N_noc1_valid;
+   assign processor_offchip_noc1_data = tile_0_0_out_N_noc1_data;
+   assign offchip_processor_noc1_yummy = tile_0_0_out_N_noc1_yummy;'''
    if (PITON_NETWORK_CONFIG == "xbar_config"):
        s = r'''
    assign processor_offchip_noc1_valid = xbar_X_TILES_out_noc1_valid;
    assign processor_offchip_noc1_data = xbar_X_TILES_out_noc1_data;
    assign offchip_processor_noc1_yummy = xbar_X_TILES_out_noc1_yummy;'''
+
+   elif PITON_NETWORK_CONFIG == "pyocn_config":
+       s = pyocn_chip_utils.str_processor_offchip_noc1()
+
+   elif PITON_NETWORK_CONFIG == "pyocn_router_config":
+       s = '''
+   //---------------------------------------------------------------------
+   // pyocn_router_config - does not need extra wiring here
+   //---------------------------------------------------------------------'''
+
    print(s.replace("X_TILES", str(PITON_X_TILES)))
 %>
    assign processor_offchip_noc2_valid = oram_offchip_valid;
    assign processor_offchip_noc2_data = oram_offchip_data;
 <%
    s = r'''
-   assign offchip_processor_noc2_yummy = tile_0_0_out_W_noc2_yummy;
-   assign processor_offchip_noc3_valid = tile_0_0_out_W_noc3_valid;
-   assign processor_offchip_noc3_data = tile_0_0_out_W_noc3_data;'''
+   assign offchip_processor_noc2_yummy = tile_0_0_out_N_noc2_yummy;
+   assign processor_offchip_noc3_valid = tile_0_0_out_N_noc3_valid;
+   assign processor_offchip_noc3_data = tile_0_0_out_N_noc3_data;'''
    if (PITON_NETWORK_CONFIG == "xbar_config"):
        s = r'''
    assign offchip_processor_noc2_yummy = xbar_X_TILES_out_noc2_yummy;
    assign processor_offchip_noc3_valid = xbar_X_TILES_out_noc3_valid;
    assign processor_offchip_noc3_data = xbar_X_TILES_out_noc3_data;'''
+
+   elif PITON_NETWORK_CONFIG == "pyocn_config":
+       s = pyocn_chip_utils.str_processor_offchip_noc3()
+
+   elif PITON_NETWORK_CONFIG == "pyocn_router_config":
+       s = '''
+   //---------------------------------------------------------------------
+   // pyocn_router_config - does not need extra wiring here
+   //---------------------------------------------------------------------'''
+
    print(s.replace("X_TILES", str(PITON_X_TILES)))
 %>
    assign offchip_processor_noc3_yummy = offchip_oram_yummy;
 <%
    s = r'''
-   assign offchip_out_E_noc1_data = offchip_processor_noc1_data;
-   assign offchip_out_E_noc1_valid = offchip_processor_noc1_valid;
-   assign offchip_out_E_noc1_yummy = processor_offchip_noc1_yummy;
-   assign offchip_out_E_noc2_data = offchip_processor_noc2_data;
-   assign offchip_out_E_noc2_valid = offchip_processor_noc2_valid;
-   assign offchip_out_E_noc2_yummy = proc_oram_yummy; //going to processor
-   assign offchip_out_E_noc3_data = oram_proc_data;
-   assign offchip_out_E_noc3_valid = oram_proc_valid;
-   assign offchip_out_E_noc3_yummy = processor_offchip_noc3_yummy;'''
+   assign offchip_out_S_noc1_data = offchip_processor_noc1_data;
+   assign offchip_out_S_noc1_valid = offchip_processor_noc1_valid;
+   assign offchip_out_S_noc1_yummy = processor_offchip_noc1_yummy;
+   assign offchip_out_S_noc2_data = offchip_processor_noc2_data;
+   assign offchip_out_S_noc2_valid = offchip_processor_noc2_valid;
+   assign offchip_out_S_noc2_yummy = proc_oram_yummy; //going to processor
+   assign offchip_out_S_noc3_data = oram_proc_data;
+   assign offchip_out_S_noc3_valid = oram_proc_valid;
+   assign offchip_out_S_noc3_yummy = processor_offchip_noc3_yummy;'''
    if (PITON_NETWORK_CONFIG == "xbar_config"):
        s = r'''
    assign offchip_out_noc1_data = offchip_processor_noc1_data;
@@ -580,6 +627,16 @@ module chip(
    assign offchip_out_noc3_data = oram_proc_data;
    assign offchip_out_noc3_valid = oram_proc_valid;
    assign offchip_out_noc3_yummy = processor_offchip_noc3_yummy;'''
+
+   elif PITON_NETWORK_CONFIG == "pyocn_config":
+        s = pyocn_chip_utils.str_offchip_out()
+
+   elif PITON_NETWORK_CONFIG == "pyocn_router_config":
+        s = r'''
+   //---------------------------------------------------------------------
+   // pyocn_router_config - does not need extra offchip wiring
+   //---------------------------------------------------------------------'''
+
    print(s)
 %>
 
@@ -623,6 +680,72 @@ module chip(
    t1 = t1 + ';'
    print(t0)
    print(t1)
+%>
+
+<%
+   template = r'''
+   /////////////////////////
+   // Extra wiring for PRGA
+   /////////////////////////
+
+   // system control
+   wire aclk, arst_n, app_rst_n;
+
+   // RXI <-> application
+   wire rxi_req_rdy, rxi_req_vld, rxi_resp_rdy, rxi_resp_vld, rxi_resp_sync, rxi_resp_parity;
+   wire [`PRGA_RXI_ADDR_WIDTH-1:0] rxi_req_addr;
+   wire [`PRGA_RXI_DATA_BYTES-1:0] rxi_req_strb;
+   wire [`PRGA_RXI_HSRID_WIDTH-1:0] rxi_resp_syncaddr;
+   wire [`PRGA_RXI_DATA_WIDTH-1:0] rxi_req_data, rxi_resp_data;
+
+   // RXI <-> programming backend (inside fabric wrapper)
+   wire prog_rst_n, prog_done, prog_req_rdy, prog_req_vld, prog_resp_rdy, prog_resp_vld, prog_resp_err;
+   wire [`PRGA_RXI_PROG_REG_ID_WIDTH-1:0] prog_req_addr;
+   wire [`PRGA_RXI_DATA_BYTES-1:0] prog_req_strb;
+   wire [`PRGA_RXI_DATA_WIDTH-1:0] prog_req_data, prog_resp_data;
+
+   // RXI <-> YAMI
+   wire [`PRGA_RXI_NUM_YAMI-1:0] yami_err, yami_activate;
+   reg  [`PRGA_RXI_NUM_YAMI-1:0] yami_err_f, yami_err_ff, yami_activate_f, yami_activate_ff;
+   wire yami_deactivate;
+   reg  yami_deactivate_f, yami_deactivate_ff;
+
+   always @(posedge clk_muxed) begin
+       if (~rst_n_inter_sync_f) begin
+           yami_err_f <= { `PRGA_RXI_NUM_YAMI {1'b0} };
+           yami_err_ff <= { `PRGA_RXI_NUM_YAMI {1'b0} };
+           yami_activate_f <= { `PRGA_RXI_NUM_YAMI {1'b0} };
+           yami_activate_ff <= { `PRGA_RXI_NUM_YAMI {1'b0} };
+           yami_deactivate_f <= 1'b0;
+           yami_deactivate_ff <= 1'b0;
+       end else begin
+           yami_err_f <= yami_err;
+           yami_err_ff <= yami_err_ff;
+           yami_activate_f <= yami_activate;
+           yami_activate_ff <= yami_activate_f;
+           yami_deactivate_f <= yami_deactivate;
+           yami_deactivate_ff <= yami_deactivate_f;
+       end
+   end
+
+   // YAMI <-> application
+   wire [`PRGA_RXI_NUM_YAMI-1:0] yami_fmc_rdy, yami_fmc_vld, yami_mfc_rdy, yami_mfc_vld, yami_fmc_parity;
+   wire [`PRGA_YAMI_MTHREAD_ID_WIDTH-1:0]       yami_fmc_thread_id[0:`PRGA_RXI_NUM_YAMI-1];
+   wire [`PRGA_YAMI_REQTYPE_WIDTH-1:0]          yami_fmc_type     [0:`PRGA_RXI_NUM_YAMI-1];
+   wire [`PRGA_YAMI_SIZE_WIDTH-1:0]             yami_fmc_size     [0:`PRGA_RXI_NUM_YAMI-1];
+   wire [`PRGA_YAMI_FMC_ADDR_WIDTH-1:0]         yami_fmc_addr     [0:`PRGA_RXI_NUM_YAMI-1];
+   wire [`PRGA_YAMI_FMC_DATA_WIDTH-1:0]         yami_fmc_data     [0:`PRGA_RXI_NUM_YAMI-1];
+   wire [`PRGA_YAMI_CACHE_NUM_WAYS_LOG2-1:0]    yami_fmc_l1rplway [0:`PRGA_RXI_NUM_YAMI-1];
+   wire [`PRGA_YAMI_MTHREAD_ID_WIDTH-1:0]       yami_mfc_thread_id[0:`PRGA_RXI_NUM_YAMI-1];
+   wire [`PRGA_YAMI_RESPTYPE_WIDTH-1:0]         yami_mfc_type     [0:`PRGA_RXI_NUM_YAMI-1];
+   wire [`PRGA_YAMI_MFC_ADDR_WIDTH-1:0]         yami_mfc_addr     [0:`PRGA_RXI_NUM_YAMI-1];
+   wire [`PRGA_YAMI_MFC_DATA_WIDTH-1:0]         yami_mfc_data     [0:`PRGA_RXI_NUM_YAMI-1];
+   wire                                         yami_mfc_l1invall [0:`PRGA_RXI_NUM_YAMI-1];
+   wire [`PRGA_YAMI_CACHE_NUM_WAYS_LOG2-1:0]    yami_mfc_l1invway [0:`PRGA_RXI_NUM_YAMI-1];
+   '''
+
+   if PITON_PRGA:
+       print(template)
 %>
 
    /////////////////////////
@@ -848,81 +971,93 @@ module chip(
        .intcnct_channel_out    (chip_intf_channel_inter),
        .intcnct_credit_back_out(chip_intf_credit_back_inter_buf_f)
    );
+`endif // endif PITON_NO_CHIP_BRIDGE
 
    // Chip Bridge val/rdy to credit
-
-   valrdy_to_credit #(4, 3) chip_from_intf_noc1_v2c(
+<%
+   s = r'''
+   `ifdef PITON_NO_CHIP_BRIDGE
+   credit_to_valrdy chip_from_intf_noc1_v2c(
       .clk(clk_muxed),
       .reset(~rst_n_inter_sync_f),
-      .data_in(intf_chip_noc1_data),
-      .valid_in(intf_chip_noc1_valid),
-      .ready_in(intf_chip_noc1_rdy),
+      .data_out(intf_chip_noc1_data),
+      .valid_out(intf_chip_noc1_valid),
+      .ready_out(intf_chip_noc1_rdy),
 
-      .data_out(offchip_processor_noc1_data),           // Data
-      .valid_out(offchip_processor_noc1_valid),       // Val signal
-      .yummy_out(offchip_processor_noc1_yummy)    // Yummy signal
+      .data_in(offchip_processor_noc1_data),           // Data
+      .valid_in(offchip_processor_noc1_valid),       // Val signal
+      .yummy_in(offchip_processor_noc1_yummy)    // Yummy signal
    );
 
-   credit_to_valrdy chip_to_intf_noc1_c2v(
+   valrdy_to_credit #(4, 3) chip_to_intf_noc1_c2v(
       .clk(clk_muxed),
       .reset(~rst_n_inter_sync_f),
-      .data_in(processor_offchip_noc1_data),
-      .valid_in(processor_offchip_noc1_valid),
-      .yummy_in(processor_offchip_noc1_yummy),
+      .data_out(processor_offchip_noc1_data),
+      .valid_out(processor_offchip_noc1_valid),
+      .yummy_out(processor_offchip_noc1_yummy),
 
-      .data_out(chip_intf_noc1_data),           // Data
-      .valid_out(chip_intf_noc1_valid),       // Val signal from dynamic network to processor
-      .ready_out(chip_intf_noc1_rdy)    // Rdy signal from processor to dynamic network
+      .data_in(chip_intf_noc1_data),           // Data
+      .valid_in(chip_intf_noc1_valid),       // Val signal from dynamic network to processor
+      .ready_in(chip_intf_noc1_rdy)    // Rdy signal from processor to dynamic network
    );
 
-   valrdy_to_credit #(4, 3) chip_from_intf_noc2_v2c(
+   credit_to_valrdy chip_from_intf_noc2_v2c(
       .clk(clk_muxed),
       .reset(~rst_n_inter_sync_f),
-      .data_in(intf_chip_noc2_data),
-      .valid_in(intf_chip_noc2_valid),
-      .ready_in(intf_chip_noc2_rdy),
+      .data_out(intf_chip_noc2_data),
+      .valid_out(intf_chip_noc2_valid),
+      .ready_out(intf_chip_noc2_rdy),
 
-      .data_out(offchip_processor_noc2_data),           // Data
-      .valid_out(offchip_processor_noc2_valid),       // Val signal
-      .yummy_out(offchip_processor_noc2_yummy)    // Yummy signal
+      .data_in(offchip_processor_noc2_data),           // Data
+      .valid_in(offchip_processor_noc2_valid),       // Val signal
+      .yummy_in(offchip_processor_noc2_yummy)    // Yummy signal
    );
 
-   credit_to_valrdy chip_to_intf_noc2_c2v(
+   valrdy_to_credit #(4, 3) chip_to_intf_noc2_c2v(
       .clk(clk_muxed),
       .reset(~rst_n_inter_sync_f),
-      .data_in(processor_offchip_noc2_data),
-      .valid_in(processor_offchip_noc2_valid),
-      .yummy_in(processor_offchip_noc2_yummy),
+      .data_out(processor_offchip_noc2_data),
+      .valid_out(processor_offchip_noc2_valid),
+      .yummy_out(processor_offchip_noc2_yummy),
 
-      .data_out(chip_intf_noc2_data),           // Data
-      .valid_out(chip_intf_noc2_valid),       // Val signal from dynamic network to processor
-      .ready_out(chip_intf_noc2_rdy)    // Rdy signal from processor to dynamic network
+      .data_in(chip_intf_noc2_data),           // Data
+      .valid_in(chip_intf_noc2_valid),       // Val signal from dynamic network to processor
+      .ready_in(chip_intf_noc2_rdy)    // Rdy signal from processor to dynamic network
    );
 
-   valrdy_to_credit #(4, 3) chip_from_intf_noc3_v2c(
+   credit_to_valrdy chip_from_intf_noc3_v2c(
       .clk(clk_muxed),
       .reset(~rst_n_inter_sync_f),
-      .data_in(intf_chip_noc3_data),
-      .valid_in(intf_chip_noc3_valid),
-      .ready_in(intf_chip_noc3_rdy),
+      .data_out(intf_chip_noc3_data),
+      .valid_out(intf_chip_noc3_valid),
+      .ready_out(intf_chip_noc3_rdy),
 
-      .data_out(offchip_processor_noc3_data),           // Data
-      .valid_out(offchip_processor_noc3_valid),       // Val signal
-      .yummy_out(offchip_processor_noc3_yummy)    // Yummy signal
+      .data_in(offchip_processor_noc3_data),           // Data
+      .valid_in(offchip_processor_noc3_valid),       // Val signal
+      .yummy_in(offchip_processor_noc3_yummy)    // Yummy signal
    );
 
-   credit_to_valrdy chip_to_intf_noc3_c2v(
+   valrdy_to_credit #(4, 3) chip_to_intf_noc3_c2v(
       .clk(clk_muxed),
       .reset(~rst_n_inter_sync_f),
-      .data_in(processor_offchip_noc3_data),
-      .valid_in(processor_offchip_noc3_valid),
-      .yummy_in(processor_offchip_noc3_yummy),
+      .data_out(processor_offchip_noc3_data),
+      .valid_out(processor_offchip_noc3_valid),
+      .yummy_out(processor_offchip_noc3_yummy),
 
-      .data_out(chip_intf_noc3_data),           // Data
-      .valid_out(chip_intf_noc3_valid),       // Val signal from dynamic network to processor
-      .ready_out(chip_intf_noc3_rdy)    // Rdy signal from processor to dynamic network
+      .data_in(chip_intf_noc3_data),           // Data
+      .valid_in(chip_intf_noc3_valid),       // Val signal from dynamic network to processor
+      .ready_in(chip_intf_noc3_rdy)    // Rdy signal from processor to dynamic network
    );
-`endif // endif PITON_NO_CHIP_BRIDGE
+   `endif'''
+
+   #if PITON_NETWORK_CONFIG == "pyocn_config" or PITON_NETWORK_CONFIG == "pyocn_router_config":
+   #    s = r'''
+   #//---------------------------------------------------------------------
+   #// pyocn_config - does not need the val/rdy-credit adapters
+   #//---------------------------------------------------------------------'''
+
+   print(s)
+%>
 
 `ifdef ORAM_ON
    oram_top oram_top(
@@ -1024,10 +1159,20 @@ module chip(
        print(xbartemplate)
        print(xbartemplate.replace("noc1", "noc2"))
        print(xbartemplate.replace("noc1", "noc3"))
+
+   elif PITON_NETWORK_CONFIG == "pyocn_config":
+       pyocn_chip_utils.print_pyocn_instances()
+
 %>
 
     // Generate tile instances
 <%
+    # Notes:
+    #
+    #   Additional templating is added below, specifically:
+    #       _TILE_ is used to instantiate `prga_ctrl_tile`
+    #       _PRGA_ADDITIONAL_WIRES_ is used to add ports specific to `prga_ctrl_tile`
+
     template = r'''
     tile #(.TILE_TYPE(TYPE_OF_TILE))
     tile0 (
@@ -1088,13 +1233,15 @@ module chip(
         .dyn0_do             ( out_noc1_data    ),
         .dyn0_do_valid       ( out_noc1_valid   ),
         .dyn0_yummyOut       ( out_noc1_yummy   ),'''
-    sub2 = subtemplate.replace('dyn0', 'dyn1');
-    sub2 = sub2.replace("noc1", "noc2");
-    sub3 = subtemplate.replace('dyn0', 'dyn2');
-    sub3 = sub3.replace("noc1", "noc3");
 
-    template += subtemplate + sub2 + sub3;
-    template = template[:-1] + r'''
+    if (PITON_NETWORK_CONFIG != "pyocn_router_config"):
+        sub2 = subtemplate.replace('dyn0', 'dyn1');
+        sub2 = sub2.replace("noc1", "noc2");
+        sub3 = subtemplate.replace('dyn0', 'dyn2');
+        sub3 = sub3.replace("noc1", "noc3");
+
+        template += subtemplate + sub2 + sub3;
+        template = template[:-1] + r'''_PRGA_ADDITIONAL_WIRES_
     );
     '''
 
@@ -1118,6 +1265,13 @@ module chip(
                     currenttype = "`PICORV32_TILE"
             elif (PITON_PICO):
                 currenttype = "`PICORV32_TILE"
+            elif (PITON_PRGA):
+                if flatid == PITON_PRGA_RXI_TILE:
+                    currenttype = "`PRGA_RXI_TILE"
+                elif flatid in PITON_PRGA_YAMI_TILES:
+                    currenttype = "`PRGA_YAMI_TILE"
+                else:
+                    currenttype = "`ARIANE_RV64_TILE"
             elif (PITON_ARIANE):
                 currenttype = "`ARIANE_RV64_TILE"
             else:
@@ -1127,6 +1281,16 @@ module chip(
 
             if (PITON_NETWORK_CONFIG == "xbar_config"):
                 currenttile = currenttile.replace("in_", "xbar_%d_out_" % i);
+
+            elif PITON_NETWORK_CONFIG == "pyocn_config":
+                currenttile = pyocn_chip_utils.str_tile_template( j, i, PITON_X_TILES, currenttype )
+
+            elif PITON_NETWORK_CONFIG == "pyocn_router_config":
+                currenttile += pyocn_chip_utils.str_router_tile_template( j, i, PITON_Y_TILES, PITON_X_TILES, currenttype )
+                currenttile = currenttile[:-1] + r'''_PRGA_ADDITIONAL_WIRES_
+    );
+    '''
+
             else:
                 # now put in the data in direction
                 if (j != 0):
@@ -1151,18 +1315,212 @@ module chip(
 
                 # special case for core 0
                 if i == 0 and j == 0:
-                    idW = "offchip"
-                    idN = "dummy"
+                    idN = "offchip"
+                    idW = "dummy"
 
                 currenttile = currenttile.replace("in_N", idN + "_out_S");
                 currenttile = currenttile.replace("in_S", idS + "_out_N");
                 currenttile = currenttile.replace("in_E", idE + "_out_W");
                 currenttile = currenttile.replace("in_W", idW + "_out_E");
 
+            _TILE_map = { 
+               "`ARIANE_RV64_TILE":         "tile", 
+               "`PRGA_RXI_TILE":            "prga_rxi_tile",
+               "`PRGA_YAMI_TILE":           "prga_yami_tile",
+            }
+            currenttile = currenttile.replace("_TILE_", _TILE_map[currenttype])
+
+            if currenttype == "`PRGA_RXI_TILE":
+                currenttile = currenttile.replace("_PRGA_ADDITIONAL_WIRES_", """
+        ,.prog_rst_n                            (prog_rst_n)
+        ,.prog_done                             (prog_done)
+        ,.prog_req_rdy                          (prog_req_rdy)
+        ,.prog_req_vld                          (prog_req_vld)
+        ,.prog_req_addr                         (prog_req_addr)
+        ,.prog_req_strb                         (prog_req_strb)
+        ,.prog_req_data                         (prog_req_data)
+        ,.prog_resp_rdy                         (prog_resp_rdy)
+        ,.prog_resp_vld                         (prog_resp_vld)
+        ,.prog_resp_err                         (prog_resp_err)
+        ,.prog_resp_data                        (prog_resp_data)
+
+        ,.aclk                                  (aclk)
+        ,.arst_n                                (arst_n)
+        ,.yami_err_i                            (yami_err_ff)
+        ,.yami_deactivate_o                     (yami_deactivate)
+        ,.yami_activate_o                       (yami_activate)
+
+        ,.app_rst_n                             (app_rst_n)
+        ,.rxi_req_rdy                           (rxi_req_rdy)
+        ,.rxi_req_vld                           (rxi_req_vld)
+        ,.rxi_req_addr                          (rxi_req_addr)
+        ,.rxi_req_strb                          (rxi_req_strb)
+        ,.rxi_req_data                          (rxi_req_data)
+        ,.rxi_resp_rdy                          (rxi_resp_rdy)
+        ,.rxi_resp_vld                          (rxi_resp_vld)
+        ,.rxi_resp_data                         (rxi_resp_data)
+        ,.rxi_resp_sync                         (rxi_resp_sync)
+        ,.rxi_resp_syncaddr                     (rxi_resp_syncaddr)
+        ,.rxi_resp_parity                       (rxi_resp_parity)
+
+        ,.yami_fmc_rdy                          (yami_fmc_rdy[0])
+        ,.yami_fmc_vld                          (yami_fmc_vld[0])
+        ,.yami_fmc_thread_id                    (yami_fmc_thread_id[0])
+        ,.yami_fmc_type                         (yami_fmc_type[0])
+        ,.yami_fmc_size                         (yami_fmc_size[0])
+        ,.yami_fmc_addr                         (yami_fmc_addr[0])
+        ,.yami_fmc_data                         (yami_fmc_data[0])
+        ,.yami_fmc_l1rplway                     (yami_fmc_l1rplway[0])
+        ,.yami_fmc_parity                       (yami_fmc_parity[0])
+        ,.yami_mfc_rdy                          (yami_mfc_rdy[0])
+        ,.yami_mfc_vld                          (yami_mfc_vld[0])
+        ,.yami_mfc_thread_id                    (yami_mfc_thread_id[0])
+        ,.yami_mfc_type                         (yami_mfc_type[0])
+        ,.yami_mfc_addr                         (yami_mfc_addr[0])
+        ,.yami_mfc_data                         (yami_mfc_data[0])
+        ,.yami_mfc_l1invall                     (yami_mfc_l1invall[0])
+        ,.yami_mfc_l1invway                     (yami_mfc_l1invway[0])
+
+                """)
+
+            elif currenttype == "`PRGA_YAMI_TILE":
+                currenttile = currenttile.replace("_PRGA_ADDITIONAL_WIRES_", """
+
+        ,.aclk                                  (aclk)
+        ,.arst_n                                (arst_n)
+
+        ,.yami_err_o                            (yami_err[_YAMI_ID_])
+        ,.yami_deactivate_i                     (yami_deactivate_ff)
+        ,.yami_activate_i                       (yami_activate_ff[_YAMI_ID_])
+
+        ,.yami_fmc_rdy                          (yami_fmc_rdy[_YAMI_ID_])
+        ,.yami_fmc_vld                          (yami_fmc_vld[_YAMI_ID_])
+        ,.yami_fmc_thread_id                    (yami_fmc_thread_id[_YAMI_ID_])
+        ,.yami_fmc_type                         (yami_fmc_type[_YAMI_ID_])
+        ,.yami_fmc_size                         (yami_fmc_size[_YAMI_ID_])
+        ,.yami_fmc_addr                         (yami_fmc_addr[_YAMI_ID_])
+        ,.yami_fmc_data                         (yami_fmc_data[_YAMI_ID_])
+        ,.yami_fmc_l1rplway                     (yami_fmc_l1rplway[_YAMI_ID_])
+        ,.yami_fmc_parity                       (yami_fmc_parity[_YAMI_ID_])
+        ,.yami_mfc_rdy                          (yami_mfc_rdy[_YAMI_ID_])
+        ,.yami_mfc_vld                          (yami_mfc_vld[_YAMI_ID_])
+        ,.yami_mfc_thread_id                    (yami_mfc_thread_id[_YAMI_ID_])
+        ,.yami_mfc_type                         (yami_mfc_type[_YAMI_ID_])
+        ,.yami_mfc_addr                         (yami_mfc_addr[_YAMI_ID_])
+        ,.yami_mfc_data                         (yami_mfc_data[_YAMI_ID_])
+        ,.yami_mfc_l1invall                     (yami_mfc_l1invall[_YAMI_ID_])
+        ,.yami_mfc_l1invway                     (yami_mfc_l1invway[_YAMI_ID_])
+
+                """)
+
+                idx = PITON_PRGA_YAMI_TILES.index(flatid) + 1
+                currenttile = currenttile.replace("_YAMI_ID_", repr( idx ))
+
+            else:
+                currenttile = currenttile.replace("_PRGA_ADDITIONAL_WIRES_", "")
+
+            if (PITON_PRGA):
+                if flatid == PITON_PRGA_RXI_TILE:
+                    currenttile = currenttile.replace("_RV64FLAT_ID_", repr( PITON_X_TILES * PITON_Y_TILES - 1 ));
+                elif flatid in PITON_PRGA_YAMI_TILES:
+                    _idx = PITON_PRGA_YAMI_TILES.index(flatid) + 2
+                    currenttile = currenttile.replace("_RV64FLAT_ID_", repr( PITON_X_TILES * PITON_Y_TILES - _idx ));
+                else:
+                    _flatid = flatid
+                    if flatid > PITON_PRGA_RXI_TILE:
+                        _flatid -= 1
+                    for _id in PITON_PRGA_YAMI_TILES:
+                        if flatid > _id:
+                            _flatid -= 1
+                    currenttile = currenttile.replace("_RV64FLAT_ID_", repr( _flatid ));
+            else:
+                currenttile = currenttile.replace("_RV64FLAT_ID_", repr( flatid ));
+
             # print "`ifdef RTL_SPARC%d" % flatid
             print(currenttile)
             # print "`endif"
 %>
+`ifdef PITON_PRGA
+`ifdef PITON_PRGA_MOCK_APP
+
+    /////////////////////////
+    // Mock App for PRGA
+    /////////////////////////
+
+    assign prog_done = 1'b1;
+    assign prog_req_rdy = 1'b0;
+    assign prog_resp_vld = 1'b0;
+    assign prog_resp_err = 1'b0;
+    assign prog_resp_data = { `PRGA_RXI_DATA_WIDTH {1'b0} };
+
+    `PITON_PRGA_MOCK_APP i_prga_mock_app (
+
+`else   /* `ifdef PITON_PRGA_MOCK_APP */
+    /////////////////////////
+    // PRGA fabric
+    /////////////////////////
+
+    prga_fabric_wrap i_prga_fabric (
+       .clk                                 (clk_muxed)
+       ,.rst_n                              (prog_rst_n)
+       ,.prog_done                          (prog_done)
+       ,.prog_req_rdy                       (prog_req_rdy)
+       ,.prog_req_vld                       (prog_req_vld)
+       ,.prog_req_addr                      (prog_req_addr)
+       ,.prog_req_strb                      (prog_req_strb)
+       ,.prog_req_data                      (prog_req_data)
+       ,.prog_resp_rdy                      (prog_resp_rdy)
+       ,.prog_resp_vld                      (prog_resp_vld)
+       ,.prog_resp_err                      (prog_resp_err)
+       ,.prog_resp_data                     (prog_resp_data),
+
+`endif  /* `ifdef PITON_PRGA_MOCK_APP */
+
+       .app_clk                             (aclk)
+       ,.app_rst_n                          (app_rst_n)
+
+       ,.rxi_req_rdy                        (rxi_req_rdy)
+       ,.rxi_req_vld                        (rxi_req_vld)
+       ,.rxi_req_addr                       (rxi_req_addr)
+       ,.rxi_req_strb                       (rxi_req_strb)
+       ,.rxi_req_data                       (rxi_req_data)
+       ,.rxi_resp_rdy                       (rxi_resp_rdy)
+       ,.rxi_resp_vld                       (rxi_resp_vld)
+       ,.rxi_resp_data                      (rxi_resp_data)
+       ,.rxi_resp_sync                      (rxi_resp_sync)
+       ,.rxi_resp_syncaddr                  (rxi_resp_syncaddr)
+       ,.rxi_resp_parity                    (rxi_resp_parity)
+
+<%
+    template = r'''
+        ,.yami_i0_fmc_rdy                   (yami_fmc_rdy[_YAMI_ID_])
+        ,.yami_i0_fmc_vld                   (yami_fmc_vld[_YAMI_ID_])
+        ,.yami_i0_fmc_thread_id             (yami_fmc_thread_id[_YAMI_ID_])
+        ,.yami_i0_fmc_type                  (yami_fmc_type[_YAMI_ID_])
+        ,.yami_i0_fmc_size                  (yami_fmc_size[_YAMI_ID_])
+        ,.yami_i0_fmc_addr                  (yami_fmc_addr[_YAMI_ID_])
+        ,.yami_i0_fmc_data                  (yami_fmc_data[_YAMI_ID_])
+        ,.yami_i0_fmc_l1rplway              (yami_fmc_l1rplway[_YAMI_ID_])
+        ,.yami_i0_fmc_parity                (yami_fmc_parity[_YAMI_ID_])
+        ,.yami_i0_mfc_rdy                   (yami_mfc_rdy[_YAMI_ID_])
+        ,.yami_i0_mfc_vld                   (yami_mfc_vld[_YAMI_ID_])
+        ,.yami_i0_mfc_thread_id             (yami_mfc_thread_id[_YAMI_ID_])
+        ,.yami_i0_mfc_type                  (yami_mfc_type[_YAMI_ID_])
+        ,.yami_i0_mfc_addr                  (yami_mfc_addr[_YAMI_ID_])
+        ,.yami_i0_mfc_data                  (yami_mfc_data[_YAMI_ID_])
+        ,.yami_i0_mfc_l1invall              (yami_mfc_l1invall[_YAMI_ID_])
+        ,.yami_i0_mfc_l1invway              (yami_mfc_l1invway[_YAMI_ID_])
+    '''
+
+    for i in range(len(PITON_PRGA_YAMI_TILES) + 1):
+        print (template.replace("yami_i0",   "yami_i" + str(i))
+                       .replace("_YAMI_ID_", str(i)))
+%>
+
+       );
+
+`endif  /* `ifdef PITON_PRGA */
+
 endmodule
 
 `endif
