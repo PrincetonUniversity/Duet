@@ -1,0 +1,14 @@
+`include "define.tmp.h"
+<%
+  from pyhplib import *
+  import os
+  import sys
+
+  # hack the python path
+  DV_ROOT = os.getenv( 'DV_ROOT' )
+  assert DV_ROOT is not None, "Environment variable DV_ROOT is not defined!"
+  sys.path.insert( 0, os.path.join( DV_ROOT, 'design/chip/pyocn/py' ) )
+
+  import pyocn_mesh_valrdy
+  pyocn_mesh_valrdy.print_module( 2, 7 )
+%>
