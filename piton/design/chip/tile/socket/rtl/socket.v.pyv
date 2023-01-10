@@ -1,0 +1,1000 @@
+// Modified by Princeton University on June 9th, 2015
+// ========== Copyright Header Begin ==========================================
+//
+// OpenSPARC T1 Processor File: iop.v
+// Copyright (c) 2006 Sun Microsystems, Inc.  All Rights Reserved.
+// DO NOT ALTER OR REMOVE COPYRIGHT NOTICES.
+//
+// The above named program is free software; you can redistribute it and/or
+// modify it under the terms of the GNU General Public
+// License version 2 as published by the Free Software Foundation.
+//
+// The above named program is distributed in the hope that it will be
+// useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+// General Public License for more details.
+//
+// You should have received a copy of the GNU General Public
+// License along with this work; if not, write to the Free Software
+// Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA.
+//
+// ========== Copyright Header End ============================================
+`include "define.tmp.h"
+`include "dmbr_define.v"
+`include "l15.tmp.h"
+`include "jtag.vh"
+<%
+DMBR_BIN_NUM = 10
+import pyhplib
+from riscvlib import *
+import os
+from pyhplib import *
+import riscvlib
+import time
+import os
+import sys
+
+# Add pyocn/py to python path
+if PITON_NETWORK_CONFIG == "pyocn_config" or PITON_NETWORK_CONFIG == "pyocn_router_config":
+    DV_ROOT = os.getenv( 'DV_ROOT' )
+    assert DV_ROOT is not None, "Environment variable DV_ROOT is not defined!"
+    sys.path.insert( 0, os.path.join( DV_ROOT, 'design/chip/pyocn/py' ) )
+    import pyocn_tile_utils
+
+%>
+
+module socket (
+    input                               clk_gated,
+    input                               rst_n_f,    // trin: assumed to be synchronous
+    input                               spc_grst_l,    // reset_n from the core
+
+    input wire [`NOC_CHIPID_WIDTH-1:0]  default_chipid,
+    input wire [`NOC_X_WIDTH-1:0]       default_coreid_x,
+    input wire [`NOC_Y_WIDTH-1:0]       default_coreid_y,
+    input wire [31:0]                   default_total_num_tiles,
+
+    // r/w port for jtag to config regs
+    input rtap_config_req_val,
+    input rtap_config_req_rw,
+    input [63:0] rtap_config_write_req_data,
+    input [`CONFIG_REG_ADDRESS_MASK] rtap_config_req_address,
+    output [63:0] config_rtap_read_res_data,
+
+    
+    // Core SRAM rtap data 
+    //input [`SRAM_WRAPPER_BUS_WIDTH-1:0]     sparc_rtap_data,
+    input [`BIST_OP_WIDTH-1:0]             rtap_srams_bist_command,
+    input [`SRAM_WRAPPER_BUS_WIDTH-1:0]    rtap_srams_bist_data,
+    output [`SRAM_WRAPPER_BUS_WIDTH-1:0]     l15_rtap_data,
+    output [`SRAM_WRAPPER_BUS_WIDTH-1:0]     l2_rtap_data,
+    
+
+    // TRI interface
+    input [4:0]                             transducer_l15_rqtype,
+    input [`L15_AMO_OP_WIDTH-1:0]           transducer_l15_amo_op,
+    input                                   transducer_l15_nc,
+    input [2:0]                             transducer_l15_size,
+    input [`L15_THREADID_MASK]              transducer_l15_threadid,
+    input                                   transducer_l15_prefetch,
+    input                                   transducer_l15_invalidate_cacheline,
+    input                                   transducer_l15_blockstore,
+    input                                   transducer_l15_blockinitstore,
+    input [1:0]                             transducer_l15_l1rplway,
+    input                                   transducer_l15_val,
+    input [39:0]                            transducer_l15_address,
+    input [63:0]                            transducer_l15_data,
+    input [63:0]                            transducer_l15_data_next_entry,
+    input [`TLB_CSM_WIDTH-1:0]              transducer_l15_csm_data,
+
+    output                                  l15_transducer_ack,
+    output                                  l15_transducer_header_ack,
+
+    output                                  l15_transducer_val,
+    output [3:0]                            l15_transducer_returntype,
+    output                                  l15_transducer_l2miss,
+    output [1:0]                            l15_transducer_error,
+    output                                  l15_transducer_noncacheable,
+    output                                  l15_transducer_atomic,
+    output [`L15_THREADID_MASK]             l15_transducer_threadid,
+    output                                  l15_transducer_prefetch,
+    output                                  l15_transducer_f4b,
+    output [63:0]                           l15_transducer_data_0,
+    output [63:0]                           l15_transducer_data_1,
+    output [63:0]                           l15_transducer_data_2,
+    output [63:0]                           l15_transducer_data_3,
+    output                                  l15_transducer_inval_icache_all_way,
+    output                                  l15_transducer_inval_dcache_all_way,
+    output [15:4]                           l15_transducer_inval_address_15_4,
+    output                                  l15_transducer_cross_invalidate,
+    output [1:0]                            l15_transducer_cross_invalidate_way,
+    output                                  l15_transducer_inval_dcache_inval,
+    output                                  l15_transducer_inval_icache_inval,
+    output [1:0]                            l15_transducer_inval_way,
+    output                                  l15_transducer_blockinitstore,
+
+    input                                   transducer_l15_req_ack,
+
+    // flatid xy convertion
+    output  [`HOME_ID_WIDTH-1:0]            l15csm_flat_id,
+    input   [`NOC_X_WIDTH-1:0]              l15csm_x,
+    input   [`NOC_Y_WIDTH-1:0]              l15csm_y,
+    output  [`HOME_ID_WIDTH-1:0]            l15noc1enc_flat_id,
+    input   [`NOC_X_WIDTH-1:0]              l15noc1enc_x,
+    input   [`NOC_Y_WIDTH-1:0]              l15noc1enc_y,
+    output  [`NOC_X_WIDTH-1:0]              l2p1s2_x,
+    output  [`NOC_Y_WIDTH-1:0]              l2p1s2_y,
+    input   [`HOME_ID_WIDTH-1:0]            l2p1s2_flat_id,
+    input   [`NOC_X_WIDTH-1:0]              l2p1s4_x,
+    input   [`NOC_Y_WIDTH-1:0]              l2p1s4_y,
+    output  [`HOME_ID_WIDTH-1:0]            l2p1s4_flat_id,
+
+    output [`HOME_ALLOC_METHOD_WIDTH-1:0]   config_home_alloc_method,
+    output [31:0]                           config_system_tile_count,
+    // configured X/Y/CHIPID
+    output [`NOC_CHIPID_WIDTH-1:0]        config_chipid,
+    output [`NOC_X_WIDTH-1:0]             config_coreid_x,
+    output [`NOC_Y_WIDTH-1:0]             config_coreid_y,
+
+    // On-chip devices
+<%
+s = '''
+    output                              splitter_dst_PORTID_vr_noc_NOCID_val,
+    output      [`NOC_DATA_WIDTH-1:0]   splitter_dst_PORTID_vr_noc_NOCID_dat,
+    input                               splitter_dst_PORTID_vr_noc_NOCID_rdy,
+
+    input                               src_PORTID_merger_vr_noc_NOCID_val,
+    input       [`NOC_DATA_WIDTH-1:0]   src_PORTID_merger_vr_noc_NOCID_dat,
+    output                              src_PORTID_merger_vr_noc_NOCID_rdy,
+
+'''
+s_noc3 = '''
+    output                              splitter_dst_PORTID_vr_noc3_val,
+    output      [`NOC_DATA_WIDTH-1:0]   splitter_dst_PORTID_vr_noc3_dat,
+    input                               splitter_dst_PORTID_vr_noc3_rdy,
+'''
+for i in range(2):
+    for j in range(1):  # reduce to only one device port for socket
+        ss = s.replace("_NOCID", repr(i+1))
+        ss = ss.replace("_PORTID", repr(j+1))
+        print(ss)
+for j in range(1):
+    ss = s_noc3.replace("_PORTID", repr(j+1))
+    print(ss)
+%>
+
+<%
+s = '''
+    // Dynamic Network Inputs 0 (User Dynamic Network)
+    input [`NOC_DATA_WIDTH-1:0]         dyn0_dataIn_N,
+    input [`NOC_DATA_WIDTH-1:0]         dyn0_dataIn_E,
+    input [`NOC_DATA_WIDTH-1:0]         dyn0_dataIn_W,
+    input [`NOC_DATA_WIDTH-1:0]         dyn0_dataIn_S,
+    input                               dyn0_validIn_N,
+    input                               dyn0_validIn_E,
+    input                               dyn0_validIn_W,
+    input                               dyn0_validIn_S,
+    input                               dyn0_dNo_yummy,
+    input                               dyn0_dEo_yummy,
+    input                               dyn0_dWo_yummy,
+    input                               dyn0_dSo_yummy,
+
+    // Dynamic Network Inputs 1 (User Dynamic Network)
+    input [`NOC_DATA_WIDTH-1:0]         dyn1_dataIn_N,
+    input [`NOC_DATA_WIDTH-1:0]         dyn1_dataIn_E,
+    input [`NOC_DATA_WIDTH-1:0]         dyn1_dataIn_W,
+    input [`NOC_DATA_WIDTH-1:0]         dyn1_dataIn_S,
+    input                               dyn1_validIn_N,
+    input                               dyn1_validIn_E,
+    input                               dyn1_validIn_W,
+    input                               dyn1_validIn_S,
+    input                               dyn1_dNo_yummy,
+    input                               dyn1_dEo_yummy,
+    input                               dyn1_dWo_yummy,
+    input                               dyn1_dSo_yummy,
+
+    // Dynamic Network 2 Inputs (User Dynamic Network)
+    input [`NOC_DATA_WIDTH-1:0]         dyn2_dataIn_N,
+    input [`NOC_DATA_WIDTH-1:0]         dyn2_dataIn_E,
+    input [`NOC_DATA_WIDTH-1:0]         dyn2_dataIn_W,
+    input [`NOC_DATA_WIDTH-1:0]         dyn2_dataIn_S,
+    input                               dyn2_validIn_N,
+    input                               dyn2_validIn_E,
+    input                               dyn2_validIn_W,
+    input                               dyn2_validIn_S,
+    input                               dyn2_dNo_yummy,
+    input                               dyn2_dEo_yummy,
+    input                               dyn2_dWo_yummy,
+    input                               dyn2_dSo_yummy,
+
+    // Dynamic network Outputs 0
+    output [`NOC_DATA_WIDTH-1:0]        dyn0_dNo,
+    output [`NOC_DATA_WIDTH-1:0]        dyn0_dEo,
+    output [`NOC_DATA_WIDTH-1:0]        dyn0_dWo,
+    output [`NOC_DATA_WIDTH-1:0]        dyn0_dSo,
+    output                              dyn0_dNo_valid,
+    output                              dyn0_dEo_valid,
+    output                              dyn0_dWo_valid,
+    output                              dyn0_dSo_valid,
+    output                              dyn0_yummyOut_N,
+    output                              dyn0_yummyOut_E,
+    output                              dyn0_yummyOut_W,
+    output                              dyn0_yummyOut_S,
+    //output [4:0]                        ec_dyn0,
+
+    // Dynamic network Outputs 1
+    output [`NOC_DATA_WIDTH-1:0]        dyn1_dNo,
+    output [`NOC_DATA_WIDTH-1:0]        dyn1_dEo,
+    output [`NOC_DATA_WIDTH-1:0]        dyn1_dWo,
+    output [`NOC_DATA_WIDTH-1:0]        dyn1_dSo,
+    output                              dyn1_dNo_valid,
+    output                              dyn1_dEo_valid,
+    output                              dyn1_dWo_valid,
+    output                              dyn1_dSo_valid,
+    output                              dyn1_yummyOut_N,
+    output                              dyn1_yummyOut_E,
+    output                              dyn1_yummyOut_W,
+    output                              dyn1_yummyOut_S,
+    //output [4:0]                        ec_dyn1,
+
+    // Dynamic network Outputs 2
+    output [`NOC_DATA_WIDTH-1:0]        dyn2_dNo,
+    output [`NOC_DATA_WIDTH-1:0]        dyn2_dEo,
+    output [`NOC_DATA_WIDTH-1:0]        dyn2_dWo,
+    output [`NOC_DATA_WIDTH-1:0]        dyn2_dSo,
+    output                              dyn2_dNo_valid,
+    output                              dyn2_dEo_valid,
+    output                              dyn2_dWo_valid,
+    output                              dyn2_dSo_valid,
+    output                              dyn2_yummyOut_N,
+    output                              dyn2_yummyOut_E,
+    output                              dyn2_yummyOut_W,
+    output                              dyn2_yummyOut_S
+    //output [4:0]                        ec_dyn2\
+'''
+if (PITON_NETWORK_CONFIG == "xbar_config"):
+  s = '''
+    //condensed signals
+    input [`NOC_DATA_WIDTH-1:0]         dyn0_dataIn,
+    input                               dyn0_validIn,
+    input                               dyn0_do_yummy,
+
+    input [`NOC_DATA_WIDTH-1:0]         dyn1_dataIn,
+    input                               dyn1_validIn,
+    input                               dyn1_do_yummy,
+
+    input [`NOC_DATA_WIDTH-1:0]         dyn2_dataIn,
+    input                               dyn2_validIn,
+    input                               dyn2_do_yummy,
+
+    output [`NOC_DATA_WIDTH-1:0]        dyn0_do,
+    output                              dyn0_do_valid,
+    output                              dyn0_yummyOut,
+
+    output [`NOC_DATA_WIDTH-1:0]        dyn1_do,
+    output                              dyn1_do_valid,
+    output                              dyn1_yummyOut,
+
+    output [`NOC_DATA_WIDTH-1:0]        dyn2_do,
+    output                              dyn2_do_valid,
+    output                              dyn2_yummyOut\
+'''
+
+if PITON_NETWORK_CONFIG == "pyocn_config":
+    s = pyocn_tile_utils.str_tile_noc_ifcs()
+
+if PITON_NETWORK_CONFIG == "pyocn_router_config":
+    s = pyocn_tile_utils.str_router_tile_noc_ifcs()
+
+print(s)
+%>
+
+);
+
+    wire [`DATA_WIDTH-1:0]              buffer_splitter_vr_noc1_dat;
+    wire [`DATA_WIDTH-1:0]              buffer_splitter_vr_noc2_dat;
+    wire [`DATA_WIDTH-1:0]              buffer_splitter_vr_noc3_dat;
+
+    wire [`NOC_DATA_WIDTH-1:0]          merger_buffer_vr_noc1_dat;
+    wire [`NOC_DATA_WIDTH-1:0]          merger_buffer_vr_noc2_dat;
+    wire [`NOC_DATA_WIDTH-1:0]          merger_buffer_vr_noc3_dat;
+
+    wire                                buffer_splitter_vr_noc1_val;
+    wire                                buffer_splitter_vr_noc2_val;
+    wire                                buffer_splitter_vr_noc3_val;
+    wire                                buffer_splitter_vr_noc1_rdy;
+    wire                                buffer_splitter_vr_noc2_rdy;
+    wire                                buffer_splitter_vr_noc3_rdy;
+
+    wire                                merger_buffer_vr_noc1_val;
+    wire                                merger_buffer_vr_noc2_val;
+    wire                                merger_buffer_vr_noc3_val;
+    wire                                merger_buffer_vr_noc1_rdy;
+    wire                                merger_buffer_vr_noc2_rdy;
+    wire                                merger_buffer_vr_noc3_rdy;
+
+
+    // NoC interface for different intra-tile devices
+    // NoC1
+    wire                                splitter_processor_vr_noc1_val;
+    wire [`NOC_DATA_WIDTH-1:0]          splitter_processor_vr_noc1_dat;
+    wire                                splitter_processor_vr_noc1_rdy;
+
+    wire                                processor_merger_vr_noc1_val;
+    wire [`NOC_DATA_WIDTH-1:0]          processor_merger_vr_noc1_dat;
+    wire                                processor_merger_vr_noc1_rdy;
+
+    // NoC2
+    wire                                splitter_processor_vr_noc2_val;
+    wire [`NOC_DATA_WIDTH-1:0]          splitter_processor_vr_noc2_dat;
+    wire                                splitter_processor_vr_noc2_rdy;
+
+    wire                                processor_merger_vr_noc2_val;
+    wire [`NOC_DATA_WIDTH-1:0]          processor_merger_vr_noc2_dat;
+    wire                                processor_merger_vr_noc2_rdy;
+    
+    // NoC3
+    wire                                splitter_processor_vr_noc3_val;
+    wire [`NOC_DATA_WIDTH-1:0]          splitter_processor_vr_noc3_dat;
+    wire                                splitter_processor_vr_noc3_rdy;
+
+    wire                                processor_merger_vr_noc3_val;
+    wire [`NOC_DATA_WIDTH-1:0]          processor_merger_vr_noc3_dat;
+    wire                                processor_merger_vr_noc3_rdy;
+
+    // Processor val/rdy interface
+
+    wire                                buffer_router_yummy_noc1;
+    wire [`NOC_DATA_WIDTH-1:0]          buffer_router_data_noc1;
+    wire                                buffer_router_valid_noc1;
+
+
+    wire                                buffer_router_yummy_noc2;
+    wire [`NOC_DATA_WIDTH-1:0]          buffer_router_data_noc2;
+    wire                                buffer_router_valid_noc2;
+
+    wire                                buffer_router_yummy_noc3;
+    wire [`NOC_DATA_WIDTH-1:0]          buffer_router_data_noc3;
+    wire                                buffer_router_valid_noc3;
+
+    wire [`NOC_DATA_WIDTH-1:0]          router_buffer_data_noc1;
+    wire                                router_buffer_data_val_noc1;
+    wire                                router_buffer_consumed_noc1;
+    wire                                thanksIn_CGNO0;
+
+    wire [`NOC_DATA_WIDTH-1:0]          router_buffer_data_noc2;
+    wire                                router_buffer_data_val_noc2;
+    wire                                router_buffer_consumed_noc2;
+    wire                                thanksIn_CGNO1;
+
+
+    wire [`NOC_DATA_WIDTH-1:0]          router_buffer_data_noc3;
+    wire                                router_buffer_data_val_noc3;
+    wire                                router_buffer_consumed_noc3;
+    wire                                thanksIn_CGNO2;
+
+
+    wire                                l15_dmbr_l1missIn;
+    wire [`DMBR_TAG_WIDTH-1:0]          l15_dmbr_l1missTag;
+    wire                                l15_dmbr_l2responseIn;
+    wire                                l15_dmbr_l2missIn;
+    wire [`DMBR_TAG_WIDTH-1:0]          l15_dmbr_l2missTag;
+    wire                                dmbr_l15_stall; // outgoing signal stalling L1.5
+
+    wire                                l15_config_req_val_s2;
+    wire                                l15_config_req_rw_s2;
+    wire [63:0]                         l15_config_write_req_data_s2;
+    wire [`CONFIG_REG_ADDRESS_MASK]     l15_config_req_address_s2;
+    wire [63:0]                         config_l15_read_res_data_s3;
+
+
+    wire                                config_dmbr_func_en;
+    wire                                config_dmbr_stall_en;
+    wire                                config_dmbr_proc_ld;
+    wire [`REPLENISH_WIDTH-1:0]         config_dmbr_replenish_cycles;
+    wire [`SCALE_WIDTH-1:0]             config_dmbr_bin_scale;
+    <%
+      for i in range(DMBR_BIN_NUM):
+        print("wire [`CREDIT_WIDTH-1:0] config_dmbr_cred_bin_%d;" % i)
+    %>
+
+    <%
+      for i in range(DMBR_BIN_NUM):
+        print("wire [`CREDIT_WIDTH-1:0] from_dmbr_cred_bin_%d;" % i)
+    %>
+    wire                                config_csm_en;
+    wire [`L15_HMT_BASE_ADDR_WIDTH-1:0] config_hmt_base;
+
+    /////////////////////////////////////////////////////
+    // Configuration Registers Needing to be Hooked Up //
+    /////////////////////////////////////////////////////
+
+    /////////////
+    // Routers //
+    // //////////
+<%
+s = '''
+    dynamic_node_top_wrap user_dynamic_network0
+      (.clk(clk_gated),
+       .reset_in(~rst_n_f),
+       // dataIn (to input blocks)
+       .dataIn_N(dyn0_dataIn_N),
+       .dataIn_E(dyn0_dataIn_E),
+       .dataIn_S(dyn0_dataIn_S),
+       .dataIn_W(dyn0_dataIn_W),
+       .dataIn_P(buffer_router_data_noc1),
+       // validIn (to input blocks)
+       .validIn_N(dyn0_validIn_N),
+       .validIn_E(dyn0_validIn_E),
+       .validIn_S(dyn0_validIn_S),
+       .validIn_W(dyn0_validIn_W),
+       .validIn_P(buffer_router_valid_noc1),
+       // yummy (from nighboring input blocks)
+       .yummyIn_N(dyn0_dNo_yummy),
+       .yummyIn_E(dyn0_dEo_yummy),
+       .yummyIn_S(dyn0_dSo_yummy),
+       .yummyIn_W(dyn0_dWo_yummy),
+       .yummyIn_P(buffer_router_yummy_noc1),
+       // My Absolute Address
+       .myLocX(config_coreid_x),
+       .myLocY(config_coreid_y),
+       .myChipID(config_chipid),
+       //.ec_cfg(15'b0),//ec_dyn_cfg[14:0]),
+       //.store_meter_partner_address_X(5'b0),
+       //.store_meter_partner_address_Y(5'b0),
+       // DataOut (from crossbar)
+       .dataOut_N(dyn0_dNo),
+       .dataOut_E(dyn0_dEo),
+       .dataOut_S(dyn0_dSo),
+       .dataOut_W(dyn0_dWo),
+       .dataOut_P(router_buffer_data_noc1), //data output to processor
+       // validOut (from crossbar)
+       .validOut_N(dyn0_dNo_valid),
+       .validOut_E(dyn0_dEo_valid),
+       .validOut_S(dyn0_dSo_valid),
+       .validOut_W(dyn0_dWo_valid),
+       .validOut_P(router_buffer_data_val_noc1), //data valid to processor
+       // yummyOut (to neighboring output blocks)
+       .yummyOut_N(dyn0_yummyOut_N),
+       .yummyOut_E(dyn0_yummyOut_E),
+       .yummyOut_W(dyn0_yummyOut_W),
+       .yummyOut_S(dyn0_yummyOut_S),
+       .yummyOut_P(router_buffer_consumed_noc1), //yummy out to neighboring
+       // thanksIn (to CGNO)
+       .thanksIn_P(thanksIn_CGNO0));
+       //.external_interrupt(),
+       //.store_meter_ack_partner(),
+       //.store_meter_ack_non_partner(),
+       //.ec_out(ec_dyn0));
+
+    dynamic_node_top_wrap user_dynamic_network1
+      (.clk(clk_gated),
+       .reset_in(~rst_n_f),
+       // dataIn (to input blocks)
+       .dataIn_N(dyn1_dataIn_N),
+       .dataIn_E(dyn1_dataIn_E),
+       .dataIn_S(dyn1_dataIn_S),
+       .dataIn_W(dyn1_dataIn_W),
+       .dataIn_P(buffer_router_data_noc2),
+       // validIn (to input blocks)
+       .validIn_N(dyn1_validIn_N),
+       .validIn_E(dyn1_validIn_E),
+       .validIn_S(dyn1_validIn_S),
+       .validIn_W(dyn1_validIn_W),
+       .validIn_P(buffer_router_valid_noc2),
+       // yummy (from nighboring input blocks)
+       .yummyIn_N(dyn1_dNo_yummy),
+       .yummyIn_E(dyn1_dEo_yummy),
+       .yummyIn_S(dyn1_dSo_yummy),
+       .yummyIn_W(dyn1_dWo_yummy),
+       .yummyIn_P(buffer_router_yummy_noc2),
+       // My Absolute Address
+       .myLocX(config_coreid_x),
+       .myLocY(config_coreid_y),
+       .myChipID(config_chipid),
+       //.ec_cfg(15'b0),//ec_dyn_cfg[14:0]),
+       //.store_meter_partner_address_X(5'b0),
+       //.store_meter_partner_address_Y(5'b0),
+       // DataOut (from crossbar)
+       .dataOut_N(dyn1_dNo),
+       .dataOut_E(dyn1_dEo),
+       .dataOut_S(dyn1_dSo),
+       .dataOut_W(dyn1_dWo),
+       .dataOut_P(router_buffer_data_noc2), //data output to processor
+       // validOut (from crossbar)
+       .validOut_N(dyn1_dNo_valid),
+       .validOut_E(dyn1_dEo_valid),
+       .validOut_S(dyn1_dSo_valid),
+       .validOut_W(dyn1_dWo_valid),
+       .validOut_P(router_buffer_data_val_noc2), //data valid to processor
+       // yummyOut (to neighboring output blocks)
+       .yummyOut_N(dyn1_yummyOut_N),
+       .yummyOut_E(dyn1_yummyOut_E),
+       .yummyOut_W(dyn1_yummyOut_W),
+       .yummyOut_S(dyn1_yummyOut_S),
+       .yummyOut_P(router_buffer_consumed_noc2), //yummy out to neighboring
+       // thanksIn (to CGNO)
+       .thanksIn_P(thanksIn_CGNO1));
+       //.external_interrupt(),
+       //.store_meter_ack_partner(),
+       //.store_meter_ack_non_partner(),
+       //.ec_out(ec_dyn1));
+
+    dynamic_node_top_wrap user_dynamic_network2
+      (.clk(clk_gated),
+       .reset_in(~rst_n_f),
+       // dataIn (to input blocks)
+       .dataIn_N(dyn2_dataIn_N),
+       .dataIn_E(dyn2_dataIn_E),
+       .dataIn_S(dyn2_dataIn_S),
+       .dataIn_W(dyn2_dataIn_W),
+       .dataIn_P(buffer_router_data_noc3),
+       // validIn (to input blocks)
+       .validIn_N(dyn2_validIn_N),
+       .validIn_E(dyn2_validIn_E),
+       .validIn_S(dyn2_validIn_S),
+       .validIn_W(dyn2_validIn_W),
+       .validIn_P(buffer_router_valid_noc3),
+       // yummy (from nighboring input blocks)
+       .yummyIn_N(dyn2_dNo_yummy),
+       .yummyIn_E(dyn2_dEo_yummy),
+       .yummyIn_S(dyn2_dSo_yummy),
+       .yummyIn_W(dyn2_dWo_yummy),
+       .yummyIn_P(buffer_router_yummy_noc3),
+       // My Absolute Address
+       .myLocX(config_coreid_x),
+       .myLocY(config_coreid_y),
+       .myChipID(config_chipid),
+       //.ec_cfg(15'b0),//ec_dyn_cfg[14:0]),
+       //.store_meter_partner_address_X(5'b0),
+       //.store_meter_partner_address_Y(5'b0),
+       // DataOut (from crossbar)
+       .dataOut_N(dyn2_dNo),
+       .dataOut_E(dyn2_dEo),
+       .dataOut_S(dyn2_dSo),
+       .dataOut_W(dyn2_dWo),
+       .dataOut_P(router_buffer_data_noc3), //data output to processor
+       // validOut (from crossbar)
+       .validOut_N(dyn2_dNo_valid),
+       .validOut_E(dyn2_dEo_valid),
+       .validOut_S(dyn2_dSo_valid),
+       .validOut_W(dyn2_dWo_valid),
+       .validOut_P(router_buffer_data_val_noc3), //data valid to processor
+       // yummyOut (to neighboring output blocks)
+       .yummyOut_N(dyn2_yummyOut_N),
+       .yummyOut_E(dyn2_yummyOut_E),
+       .yummyOut_W(dyn2_yummyOut_W),
+       .yummyOut_S(dyn2_yummyOut_S),
+       .yummyOut_P(router_buffer_consumed_noc3), //yummy out to processor
+       // thanksIn (to CGNO)
+       .thanksIn_P(thanksIn_CGNO2));
+       //.external_interrupt(),
+       //.store_meter_ack_partner(),
+       //.store_meter_ack_non_partner(),
+       //.ec_out(ec_dyn2));
+'''
+if (PITON_NETWORK_CONFIG == "xbar_config"):
+  s = '''
+    assign dyn0_do = buffer_router_data_noc1;
+    assign dyn0_do_valid = buffer_router_valid_noc1;
+    assign dyn0_yummyOut = buffer_router_yummy_noc1;
+    assign router_buffer_data_noc1 = dyn0_dataIn;
+    assign router_buffer_data_val_noc1 = dyn0_validIn;
+    assign router_buffer_consumed_noc1 = dyn0_do_yummy;
+
+    assign dyn1_do = buffer_router_data_noc2;
+    assign dyn1_do_valid = buffer_router_valid_noc2;
+    assign dyn1_yummyOut = buffer_router_yummy_noc2;
+    assign router_buffer_data_noc2 = dyn1_dataIn;
+    assign router_buffer_data_val_noc2 = dyn1_validIn;
+    assign router_buffer_consumed_noc2 = dyn1_do_yummy;
+
+    assign dyn2_do = buffer_router_data_noc3;
+    assign dyn2_do_valid = buffer_router_valid_noc3;
+    assign dyn2_yummyOut = buffer_router_yummy_noc3;
+    assign router_buffer_data_noc3 = dyn2_dataIn;
+    assign router_buffer_data_val_noc3 = dyn2_validIn;
+    assign router_buffer_consumed_noc3 = dyn2_do_yummy;
+'''
+
+if PITON_NETWORK_CONFIG == "pyocn_config":
+    s = pyocn_tile_utils.str_tile_noc_ifcs_connects()
+
+if PITON_NETWORK_CONFIG == "pyocn_router_config":
+    s = pyocn_tile_utils.str_router_inst(0) + \
+        pyocn_tile_utils.str_router_inst(1) + \
+        pyocn_tile_utils.str_router_inst(2)
+
+print(s)
+%>
+    ////////////////////////////////////////////
+    // Credit - Val/Rdy Interface Transducers //
+    ///////////////////////////////////////////
+<%
+NIB_SIZE_LOG2 = 4
+if (PITON_NETWORK_CONFIG == "xbar_config"):
+  NIB_SIZE_LOG2 = 2
+NIB_SIZE = pow(2, NIB_SIZE_LOG2)
+
+s = '''\
+    valrdy_to_credit #({buffer_size}, {buffer_bits}) cgno_blk1(
+        .clk(clk_gated),
+        .reset(~rst_n_f),
+        .data_in(merger_buffer_vr_noc1_dat),
+        .valid_in(merger_buffer_vr_noc1_val),
+        .ready_in(merger_buffer_vr_noc1_rdy),
+
+        .data_out(buffer_router_data_noc1),           // Data
+        .valid_out(buffer_router_valid_noc1),       // Val signal
+        .yummy_out(router_buffer_consumed_noc1)    // Yummy signal
+    );
+
+    valrdy_to_credit #({buffer_size}, {buffer_bits}) cgno_blk2(
+        .clk(clk_gated),
+        .reset(~rst_n_f),
+        .data_in(merger_buffer_vr_noc2_dat),
+        .valid_in(merger_buffer_vr_noc2_val),
+        .ready_in(merger_buffer_vr_noc2_rdy),
+
+        .data_out(buffer_router_data_noc2),           // Data
+        .valid_out(buffer_router_valid_noc2),       // Val signal
+        .yummy_out(router_buffer_consumed_noc2)    // Yummy signal
+    );
+
+    valrdy_to_credit #({buffer_size}, {buffer_bits}) cgno_blk3(
+        .clk(clk_gated),
+        .reset(~rst_n_f),
+        .data_in(merger_buffer_vr_noc3_dat),
+        .valid_in(merger_buffer_vr_noc3_val),
+        .ready_in(merger_buffer_vr_noc3_rdy),
+
+        .data_out(buffer_router_data_noc3),           // Data
+        .valid_out(buffer_router_valid_noc3),       // Val signal
+        .yummy_out(router_buffer_consumed_noc3)    // Yummy signal
+    );
+
+
+    credit_to_valrdy cgni_blk1(
+        .clk(clk_gated),
+        .reset(~rst_n_f),
+        .data_in(router_buffer_data_noc1),
+        .valid_in(router_buffer_data_val_noc1),
+        .yummy_in(buffer_router_yummy_noc1),
+
+        .data_out(buffer_splitter_vr_noc1_dat),           // Data
+        .valid_out(buffer_splitter_vr_noc1_val),       // Val signal from dynamic network to processor
+        .ready_out(buffer_splitter_vr_noc1_rdy)    // Rdy signal from processor to dynamic network
+    );
+
+    credit_to_valrdy cgni_blk2(
+        .clk(clk_gated),
+        .reset(~rst_n_f),
+        .data_in(router_buffer_data_noc2),
+        .valid_in(router_buffer_data_val_noc2),
+        .yummy_in(buffer_router_yummy_noc2),
+
+        .data_out(buffer_splitter_vr_noc2_dat),           // Data
+        .valid_out(buffer_splitter_vr_noc2_val),       // Val signal from dynamic network to processor
+        .ready_out(buffer_splitter_vr_noc2_rdy)    // Rdy signal from processor to dynamic network
+    );
+
+    credit_to_valrdy cgni_blk3(
+        .clk(clk_gated),
+        .reset(~rst_n_f),
+        .data_in(router_buffer_data_noc3),
+        .valid_in(router_buffer_data_val_noc3),
+        .yummy_in(buffer_router_yummy_noc3),
+
+        .data_out(buffer_splitter_vr_noc3_dat),           // Data
+        .valid_out(buffer_splitter_vr_noc3_val),       // Val signal from dynamic network to processor
+        .ready_out(buffer_splitter_vr_noc3_rdy)    // Rdy signal from processor to dynamic network
+    );
+'''.format( buffer_size=NIB_SIZE, buffer_bits=NIB_SIZE_LOG2+1 )
+
+if PITON_NETWORK_CONFIG == "pyocn_config" or PITON_NETWORK_CONFIG == "pyocn_router_config":
+    s = '''
+    //--------------------------------------------------------------------
+    // pyocn_config: no val/rdy - credit transducers needed
+    //--------------------------------------------------------------------
+'''
+
+print(s)
+%>
+
+//----------------------------------------------------------------------------------------------
+// noc message splitter and merger: forward the flit to other in-tile devices based on the fbits
+//----------------------------------------------------------------------------------------------
+
+// Fbits are not set separately for different NoCs, 
+// which means if you hook dev1 to port1 in NoC1, 
+// you should also hook that to port1 in NoC2 and NoC3.
+<% 
+s_splitter = '''
+    noc_simple_splitter noc_NOCID_splitter(
+        .clk                        (clk_gated)                     ,
+        .rst_n                      (rst_n_f)                       ,
+
+        .src_splitter_vr_noc_val       (buffer_splitter_vr_noc_NOCID_val),
+        .src_splitter_vr_noc_dat       (buffer_splitter_vr_noc_NOCID_dat),
+        .src_splitter_vr_noc_rdy       (buffer_splitter_vr_noc_NOCID_rdy),
+                                                           
+        .splitter_dst0_vr_noc_val     (splitter_processor_vr_noc_NOCID_val), // For L15 and L2
+        .splitter_dst0_vr_noc_dat     (splitter_processor_vr_noc_NOCID_dat),
+        .splitter_dst0_vr_noc_rdy     (splitter_processor_vr_noc_NOCID_rdy),
+                                                           
+        .splitter_dst1_vr_noc_val     (splitter_dst1_vr_noc_NOCID_val),
+        .splitter_dst1_vr_noc_dat     (splitter_dst1_vr_noc_NOCID_dat),
+        .splitter_dst1_vr_noc_rdy     (splitter_dst1_vr_noc_NOCID_rdy)
+    );
+'''
+    
+s_merger = '''
+    noc_simple_merger noc_NOCID_merger(   
+        .clk                        (clk_gated),
+        .rst_n                      (rst_n_f),
+                                                          
+        .src0_merger_vr_noc_val       (processor_merger_vr_noc_NOCID_val), // For L15 and L2
+        .src0_merger_vr_noc_dat       (processor_merger_vr_noc_NOCID_dat),
+        .src0_merger_vr_noc_rdy       (processor_merger_vr_noc_NOCID_rdy),
+                                                          
+        .src1_merger_vr_noc_val       (src1_merger_vr_noc_NOCID_val),
+        .src1_merger_vr_noc_dat       (src1_merger_vr_noc_NOCID_dat),
+        .src1_merger_vr_noc_rdy       (src1_merger_vr_noc_NOCID_rdy),
+                                     
+        .merger_dst_vr_noc_val         (merger_buffer_vr_noc_NOCID_val),  
+        .merger_dst_vr_noc_dat         (merger_buffer_vr_noc_NOCID_dat),
+        .merger_dst_vr_noc_rdy         (merger_buffer_vr_noc_NOCID_rdy)   
+    );
+'''
+for i in range(3):
+    ss = s_splitter.replace("_NOCID", repr(i+1))
+    print(ss)
+for i in range(2):
+    ss = s_merger.replace("_NOCID", repr(i+1))
+    print(ss)
+%>
+
+// For the NoC3 output, we only have one possibile source(processor)
+// So we don't need to instantiate merger for NoC3,
+// and can just directly connect them.
+assign merger_buffer_vr_noc3_val=processor_merger_vr_noc3_val;
+assign merger_buffer_vr_noc3_dat=processor_merger_vr_noc3_dat;
+assign processor_merger_vr_noc3_rdy=merger_buffer_vr_noc3_rdy;
+
+
+    //////////
+    // L1.5 //
+    //////////
+
+    l15_wrap l15(
+        .clk(clk_gated),
+        .rst_n(spc_grst_l),
+
+        .transducer_l15_rqtype              (transducer_l15_rqtype),
+        .transducer_l15_amo_op              (transducer_l15_amo_op),
+        .transducer_l15_nc                  (transducer_l15_nc),
+        .transducer_l15_size                (transducer_l15_size),
+        // .pcxdecoder_l15_invalall         (transducer_l15_invalall),
+        .transducer_l15_threadid            (transducer_l15_threadid),
+        .transducer_l15_prefetch            (transducer_l15_prefetch),
+        .transducer_l15_blockstore          (transducer_l15_blockstore),
+        .transducer_l15_blockinitstore      (transducer_l15_blockinitstore),
+        .transducer_l15_l1rplway            (transducer_l15_l1rplway),
+        .transducer_l15_val                 (transducer_l15_val),
+        .transducer_l15_invalidate_cacheline(transducer_l15_invalidate_cacheline),
+        .transducer_l15_address             (transducer_l15_address),
+        .transducer_l15_csm_data            (transducer_l15_csm_data),
+        .transducer_l15_data                (transducer_l15_data),
+        .transducer_l15_data_next_entry     (transducer_l15_data_next_entry),
+
+        .l15_transducer_ack                 (l15_transducer_ack),
+        .l15_transducer_header_ack          (l15_transducer_header_ack),
+
+        .l15_transducer_val                 (l15_transducer_val),
+        .l15_transducer_returntype          (l15_transducer_returntype),
+        .l15_transducer_l2miss              (l15_transducer_l2miss),
+        .l15_transducer_error               (l15_transducer_error),
+        .l15_transducer_noncacheable        (l15_transducer_noncacheable),
+        .l15_transducer_atomic              (l15_transducer_atomic),
+        .l15_transducer_threadid            (l15_transducer_threadid),
+        .l15_transducer_prefetch            (l15_transducer_prefetch),
+        .l15_transducer_f4b                 (l15_transducer_f4b),
+        .l15_transducer_data_0              (l15_transducer_data_0),
+        .l15_transducer_data_1              (l15_transducer_data_1),
+        .l15_transducer_data_2              (l15_transducer_data_2),
+        .l15_transducer_data_3              (l15_transducer_data_3),
+        .l15_transducer_inval_icache_all_way(l15_transducer_inval_icache_all_way),
+        .l15_transducer_inval_dcache_all_way(l15_transducer_inval_dcache_all_way),
+        .l15_transducer_inval_address_15_4  (l15_transducer_inval_address_15_4),
+        .l15_transducer_cross_invalidate    (l15_transducer_cross_invalidate),
+        .l15_transducer_cross_invalidate_way(l15_transducer_cross_invalidate_way),
+        .l15_transducer_inval_dcache_inval  (l15_transducer_inval_dcache_inval),
+        .l15_transducer_inval_icache_inval  (l15_transducer_inval_icache_inval),
+        .l15_transducer_inval_way           (l15_transducer_inval_way),
+        .l15_transducer_blockinitstore      (l15_transducer_blockinitstore),
+
+        .transducer_l15_req_ack             (transducer_l15_req_ack),
+
+
+        .noc1_out_rdy(processor_merger_vr_noc1_rdy),
+        .noc1_out_val(processor_merger_vr_noc1_val),
+        .noc1_out_data(processor_merger_vr_noc1_dat),
+        .noc2_in_val(splitter_processor_vr_noc2_val),
+        .noc2_in_data(splitter_processor_vr_noc2_dat),
+        .noc2_in_rdy(splitter_processor_vr_noc2_rdy),
+        .noc3_out_rdy(processor_merger_vr_noc3_rdy),
+        .noc3_out_val(processor_merger_vr_noc3_val),
+        .noc3_out_data(processor_merger_vr_noc3_dat),
+
+        .dmbr_l15_stall(dmbr_l15_stall),
+        .chipid(config_chipid),
+        .coreid_x(config_coreid_x),
+        .coreid_y(config_coreid_y),
+
+        .l15_dmbr_l1missIn(l15_dmbr_l1missIn),
+        .l15_dmbr_l1missTag(l15_dmbr_l1missTag),
+        .l15_dmbr_l2missIn(l15_dmbr_l2missIn),
+        .l15_dmbr_l2missTag(l15_dmbr_l2missTag),
+        .l15_dmbr_l2responseIn(l15_dmbr_l2responseIn),
+
+        // config registers
+        .l15_config_req_val_s2(l15_config_req_val_s2),
+        .l15_config_req_rw_s2(l15_config_req_rw_s2),
+        .l15_config_write_req_data_s2(l15_config_write_req_data_s2),
+        .l15_config_req_address_s2(l15_config_req_address_s2),
+        .config_l15_read_res_data_s3(config_l15_read_res_data_s3),
+
+        // config regs
+        .config_csm_en(config_csm_en),
+        .config_hmt_base(config_hmt_base),
+        .config_system_tile_count(config_system_tile_count),
+        .config_home_alloc_method(config_home_alloc_method),
+       
+        .l15csm_flat_id      (l15csm_flat_id),  
+        .l15csm_x            (l15csm_x      ),
+        .l15csm_y            (l15csm_y      ),
+        .l15noc1enc_flat_id  (l15noc1enc_flat_id),  
+        .l15noc1enc_x        (l15noc1enc_x      ),
+        .l15noc1enc_y        (l15noc1enc_y      ),
+
+        // sram interfaces
+        .srams_rtap_data (l15_rtap_data),
+        .rtap_srams_bist_command (rtap_srams_bist_command),
+        .rtap_srams_bist_data (rtap_srams_bist_data)
+    );
+
+    //////////
+    // DMBR //
+    //////////
+
+    dmbr dmbr_ins (
+        .clk                  (clk_gated                      ),
+        .rst                  (~spc_grst_l              ),
+        .func_en              (config_dmbr_func_en      ),
+        .stall_en             (config_dmbr_stall_en     ),
+        //.dmbr_en(dmbr_en),
+        .proc_ld              (config_dmbr_proc_ld      ),
+
+        //inputs (the credits should take into account credit scaling factor,
+        //which means creditIn_0 should be 1/10 of the original credit) ???
+        // are you shure that a scale factor can be 10? //alavrov
+        <%
+          for i in range(DMBR_BIN_NUM):
+            print(".creditIn_%d\t\t(config_dmbr_cred_bin_%d)," % (i,i))
+        %>
+
+        //scale factor for replenishment (shoud be 1000)
+        .replenishCyclesIn    (config_dmbr_replenish_cycles ),
+
+        //scale factor for arrival interval checking (shoud be 3)
+        .binScaleIn           (config_dmbr_bin_scale        ),
+
+        // Input from L1.5
+        .l1missIn             (l15_dmbr_l1missIn            ),
+        .l1missTag            (l15_dmbr_l1missTag           ),
+
+        // Input from L2
+        .l2missIn             (l15_dmbr_l2missIn            ),
+        .l2missTag            (l15_dmbr_l2missTag           ),
+        .l2responseIn         (l15_dmbr_l2responseIn        ),
+
+        //outputs
+        <%
+        for i in range(DMBR_BIN_NUM):
+          print(".curr_cred_bin_%d\t\t\t(from_dmbr_cred_bin_%d)," % (i,i))
+        %>
+
+        .stallOut             (dmbr_l15_stall           )
+    );
+
+    ////////
+    // L2 //
+    ////////
+
+    l2 l2(
+        .clk(clk_gated),
+        .rst_n(rst_n_f),
+        .chipid(config_chipid),
+        .coreid_x(config_coreid_x),
+        .coreid_y(config_coreid_y),
+
+        .noc1_valid_in(splitter_processor_vr_noc1_val),
+        .noc3_valid_in(splitter_processor_vr_noc3_val),
+        .noc1_data_in( splitter_processor_vr_noc1_dat),
+        .noc3_data_in( splitter_processor_vr_noc3_dat),
+        .noc2_ready_out(processor_merger_vr_noc2_rdy),
+        
+        .noc1_ready_in(splitter_processor_vr_noc1_rdy),
+        .noc3_ready_in(splitter_processor_vr_noc3_rdy),
+        .noc2_valid_out(processor_merger_vr_noc2_val),
+        .noc2_data_out(processor_merger_vr_noc2_dat),
+
+        .l2p1s2_x               (l2p1s2_x      ),
+        .l2p1s2_y               (l2p1s2_y      ),
+        .l2p1s2_flat_id         (l2p1s2_flat_id),
+        .l2p1s4_x               (l2p1s4_x      ),
+        .l2p1s4_y               (l2p1s4_y      ),
+        .l2p1s4_flat_id         (l2p1s4_flat_id),
+
+        // interface to srams
+        .srams_rtap_data (l2_rtap_data),
+        .rtap_srams_bist_command (rtap_srams_bist_command),
+        .rtap_srams_bist_data (rtap_srams_bist_data)
+    );
+
+    ////////////////////////////////////
+    // Uncore Configuration Registers //
+    ////////////////////////////////////
+
+    config_regs uncore_config(
+        .clk                          (clk_gated                          ),
+        .rst_n                        (rst_n_f                        ),
+
+        .l15_config_req_val_s2        (l15_config_req_val_s2        ),
+        .l15_config_req_rw_s2         (l15_config_req_rw_s2         ),
+        .l15_config_write_req_data_s2 (l15_config_write_req_data_s2 ),
+        .l15_config_req_address_s2    (l15_config_req_address_s2    ),
+        .config_l15_read_res_data_s3  (config_l15_read_res_data_s3  ),
+
+        .default_chipid               (default_chipid               ),
+        .default_coreid_x             (default_coreid_x             ),
+        .default_coreid_y             (default_coreid_y             ),
+        .default_total_num_tiles      (default_total_num_tiles      ),
+
+        .config_hmt_base              (config_hmt_base              ),
+
+        .config_dmbr_func_en          (config_dmbr_func_en          ),
+        .config_dmbr_stall_en         (config_dmbr_stall_en         ),
+        .config_dmbr_proc_ld          (config_dmbr_proc_ld          ),
+        .config_dmbr_replenish_cycles (config_dmbr_replenish_cycles ),
+        .config_dmbr_bin_scale        (config_dmbr_bin_scale        ),
+
+        // config_registers -> DMBR
+        <%
+          for i in range(DMBR_BIN_NUM):
+            print(".config_dmbr_cred_bin_%d\t\t\t(config_dmbr_cred_bin_%d)," % (i,i))
+        %>
+
+        // DMBR -> config registers
+        <%
+          for i in range(DMBR_BIN_NUM):
+            print(".from_dmbr_cred_bin_%d\t\t\t(from_dmbr_cred_bin_%d)," % (i,i))
+        %>
+
+        .config_csm_en                (config_csm_en                ),
+        .config_system_tile_count     (config_system_tile_count     ),
+        .config_home_alloc_method     (config_home_alloc_method     ),
+        .config_chipid                (config_chipid                ),
+        .config_coreid_x              (config_coreid_x              ),
+        .config_coreid_y              (config_coreid_y              ),
+
+        // jtag-config_regs interface
+        .rtap_config_req_val (rtap_config_req_val),
+        .rtap_config_req_rw (rtap_config_req_rw),
+        .rtap_config_write_req_data (rtap_config_write_req_data),
+        .rtap_config_req_address (rtap_config_req_address),
+        .config_rtap_read_res_data (config_rtap_read_res_data)
+    );
+
+
+endmodule
+
