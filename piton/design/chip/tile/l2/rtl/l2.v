@@ -63,6 +63,13 @@ module l2(
     output wire [`NOC_DATA_WIDTH-1:0] noc2_data_out,
     input wire noc2_ready_out,
 
+    output  [`NOC_X_WIDTH-1:0]   l2p1s2_x,
+    output  [`NOC_Y_WIDTH-1:0]   l2p1s2_y,
+    input   [`L2_OWNER_BITS-1:0] l2p1s2_flat_id,
+    input   [`NOC_X_WIDTH-1:0]   l2p1s4_x,
+    input   [`NOC_Y_WIDTH-1:0]   l2p1s4_y,
+    output  [`L2_OWNER_BITS-1:0] l2p1s4_flat_id,
+
     // sram interface
     output wire [`SRAM_WRAPPER_BUS_WIDTH-1:0] srams_rtap_data,
     input wire  [`BIST_OP_WIDTH-1:0] rtap_srams_bist_command,
@@ -74,10 +81,7 @@ wire [`SRAM_WRAPPER_BUS_WIDTH-1:0] data_rtap_data;
 wire [`SRAM_WRAPPER_BUS_WIDTH-1:0] dir_rtap_data;
 wire [`SRAM_WRAPPER_BUS_WIDTH-1:0] tag_rtap_data;
 wire [`SRAM_WRAPPER_BUS_WIDTH-1:0] state_rtap_data;
-assign srams_rtap_data = data_rtap_data
-                            | dir_rtap_data
-                            | tag_rtap_data
-                            | state_rtap_data;
+assign srams_rtap_data = data_rtap_data | dir_rtap_data | tag_rtap_data | state_rtap_data;
 
 localparam y = 1'b1;
 localparam n = 1'b0;
@@ -609,6 +613,13 @@ l2_pipe1 pipe1(
 
     .reg_data_out           (reg_data_out),
     .reg_data_in            (reg_data_in),
+    
+    .src_x_S2_f                 (l2p1s2_x      ),
+    .src_y_S2_f                 (l2p1s2_y      ),
+    .flat_id_S2                 (l2p1s2_flat_id),
+    .fwd_dst_x_S4               (l2p1s4_x      ),
+    .fwd_dst_y_S4               (l2p1s4_y      ),
+    .fwd_dst_flat_id_S4         (l2p1s4_flat_id),
 
     .mshr_cam_en            (mshr_cam_en_p1),
     .mshr_wr_state_en       (mshr_wr_state_en_p1),

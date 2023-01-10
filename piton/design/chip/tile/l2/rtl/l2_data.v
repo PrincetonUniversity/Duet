@@ -177,5 +177,4 @@ sram_l2_data l2_data_array(
     .SRAMID(`BIST_ID_L2_DATA)
 );
 
-
 endmodule

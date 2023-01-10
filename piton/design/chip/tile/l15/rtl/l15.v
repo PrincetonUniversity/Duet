@@ -128,6 +128,14 @@ module l15 (
     output [63:0]                           l15_config_write_req_data_s2,
     output [`CONFIG_REG_ADDRESS_MASK]       l15_config_req_address_s2,
 
+    // flat_id_to_xy interface, used in l15_csm
+    output [`HOME_ID_WIDTH-1:0]             l15csm_flat_id,
+    input  [`NOC_X_WIDTH-1:0]               l15csm_x      ,
+    input  [`NOC_Y_WIDTH-1:0]               l15csm_y      ,
+    output [`HOME_ID_WIDTH-1:0]             l15noc1enc_flat_id,
+    input  [`NOC_X_WIDTH-1:0]               l15noc1enc_x      ,
+    input  [`NOC_Y_WIDTH-1:0]               l15noc1enc_y      ,
+
     // sram interface
     output [`SRAM_WRAPPER_BUS_WIDTH-1:0]    srams_rtap_data,
     input  [`BIST_OP_WIDTH-1:0]             rtap_srams_bist_command,
@@ -209,6 +217,10 @@ l15_csm l15_csm(
     .csm_l15_res_val_s3(csm_l15_res_val_s3),
     .csm_l15_res_data_s3(csm_l15_res_data_s3),
     
+    .lhid_s3        (l15csm_flat_id),  
+    .lhid_s3_x      (l15csm_x      ),
+    .lhid_s3_y      (l15csm_y      ),
+
     // interface with noc1
     .noc1encoder_csm_req_ack(noc1encoder_csm_req_ack),
     .csm_noc1encoder_req_val(csm_noc1encoder_req_val),
@@ -960,6 +972,10 @@ noc1encoder noc1encoder(
     .noc1encoder_noc1out_val(noc1_out_val),
     .noc1encoder_noc1out_data(noc1_out_data),
     
+    .t1_interrupt_cpuid           (l15noc1enc_flat_id),  
+    .msg_dest_l2_xpos_compat      (l15noc1enc_x      ),
+    .msg_dest_l2_ypos_compat      (l15noc1enc_y      ),
+
     // csm interface
     .noc1encoder_csm_req_ack(noc1encoder_csm_req_ack),
     .csm_noc1encoder_req_val(csm_noc1encoder_req_val),

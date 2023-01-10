@@ -77,6 +77,11 @@ module l15_csm(
    output reg csm_l15_res_val_s3,
    output reg [63:0] csm_l15_res_data_s3,
 
+   // flat_id_to_xy interface
+   output reg [`HOME_ID_WIDTH-1:0] lhid_s3,
+   input wire [`NOC_X_WIDTH-1:0]   lhid_s3_x,
+   input wire [`NOC_Y_WIDTH-1:0]   lhid_s3_y,
+
    // noc1 interface
    input wire noc1encoder_csm_req_ack,
    output wire csm_noc1encoder_req_val,
@@ -85,7 +90,6 @@ module l15_csm(
    output wire [`PHY_ADDR_WIDTH-1:0] csm_noc1encoder_req_address,
    output wire csm_noc1encoder_req_non_cacheable,
    output wire  [`PCX_SIZE_WIDTH-1:0] csm_noc1encoder_req_size
-
 );
 
 // storage for ticketed ghid translations
@@ -173,7 +177,8 @@ end
 
 always @ *
 begin
-    if (special_l2_addr_s2)
+    // For Displacement Flush, we use the home_alloc_method to extract home id. 
+    if (special_l2_addr_s2 && (l15_csm_req_address_s2[39:34] != 6'b101011))
     begin
         home_addr_bits_s2 = l15_csm_req_address_s2[`HOME_ID_ADDR_POS_HIGH];
     end
@@ -218,6 +223,8 @@ begin
    end
    else
    begin
+      // for non-cacheable request, lhid_s2 is meaningless. 
+      // Need to check: Will passing the nonsense lhid_s2 to addr_in_s2 cause problem? 
       addr_in_s2 = {l15_csm_req_clump_id_s2, lhid_s2};
    end
 end
@@ -344,7 +351,6 @@ reg l15_csm_req_val_s3;
 reg [`L15_CSM_NUM_TICKETS_LOG2-1:0] l15_csm_req_ticket_s3;
 reg [`L15_HMC_ADDR_WIDTH-1:0] addr_in_s3;
 reg [`L15_HMC_DATA_IN_WIDTH-1:0] data_in_s3;
-reg [`HOME_ID_WIDTH-1:0] lhid_s3;
 reg diag_en_s3;
 reg flush_en_s3;
 reg rd_en_s3;
@@ -353,6 +359,11 @@ reg [`NOC_CHIPID_WIDTH-1:0] l15_csm_chipid_s3;
 reg [`NOC_X_WIDTH-1:0] l15_csm_x_s3;
 reg [`NOC_Y_WIDTH-1:0] l15_csm_y_s3;
 reg l15_csm_clump_sel_s3;
+
+reg  on_chip_dev_access_s3;
+reg [`NOC_X_WIDTH-1:0] on_chip_dev_access_x_s3;
+reg [`NOC_Y_WIDTH-1:0] on_chip_dev_access_y_s3;
+
 
 always @ (posedge clk)
 begin
@@ -398,6 +409,15 @@ begin
 end
 
 
+always @ *
+begin
+    //on-chip device accesses start with 0xE0 or 0xE1
+    on_chip_dev_access_s3 = (l15_csm_req_address_s3[39:33] == 7'b1110000);
+
+    on_chip_dev_access_x_s3 = l15_csm_req_address_s3[`ON_CHIP_DEV_X_POS];
+    on_chip_dev_access_y_s3 = l15_csm_req_address_s3[`ON_CHIP_DEV_Y_POS];
+end
+
 //Stage 3
 
 `ifndef NO_RTL_CSM
@@ -408,10 +428,6 @@ wire hit_s3;
 wire [`L15_HMC_DATA_OUT_WIDTH-1:0] data_out_s3;
 wire [`L15_HMC_VALID_WIDTH-1:0] valid_out_s3;
 wire [`L15_HMC_TAG_WIDTH-1:0] tag_out_s3;
-
-wire [`NOC_X_WIDTH-1:0] lhid_s3_x;
-wire [`NOC_Y_WIDTH-1:0] lhid_s3_y;
-
 
 always @ *
 begin
@@ -497,18 +513,11 @@ begin
         begin
             csm_l15_res_data_s3 = 0;
             csm_l15_res_data_s3[`PACKET_HOME_ID_CHIP_MASK] = 1'b0; // non-csm mode only has 1 chip alone
-            csm_l15_res_data_s3[`PACKET_HOME_ID_Y_MASK] = lhid_s3_y;
-            csm_l15_res_data_s3[`PACKET_HOME_ID_X_MASK] = lhid_s3_x;
+            csm_l15_res_data_s3[`PACKET_HOME_ID_Y_MASK] = on_chip_dev_access_s3 ? on_chip_dev_access_y_s3 : lhid_s3_y;
+            csm_l15_res_data_s3[`PACKET_HOME_ID_X_MASK] = on_chip_dev_access_s3 ? on_chip_dev_access_x_s3 : lhid_s3_x;
         end
     end
 end
-
-flat_id_to_xy lhid_to_xy (
-    .flat_id(lhid_s3[`HOME_ID_WIDTH-1:0]),
-    .x_coord(lhid_s3_x),
-    .y_coord(lhid_s3_y)
-    );
-
 
 
 always @ (posedge clk)
@@ -651,10 +660,8 @@ assign csm_noc1encoder_req_address = refill_req_addr_buf[refill_req_buf_rd_ptr];
 assign csm_noc1encoder_req_non_cacheable = 1'b1;
 assign csm_noc1encoder_req_size = `MSG_DATA_SIZE_16B; 
 
-`else
 
-wire [`NOC_X_WIDTH-1:0] lhid_s3_x;
-wire [`NOC_Y_WIDTH-1:0] lhid_s3_y;
+`else
 
 // read port for ghid
 assign csm_l15_read_res_data = 0;
@@ -677,15 +684,9 @@ always @ *
 begin
     csm_l15_res_data_s3 = 0;
     csm_l15_res_data_s3[`PACKET_HOME_ID_CHIP_MASK] = 1'b0; // non-csm mode only has 1 chip alone
-    csm_l15_res_data_s3[`PACKET_HOME_ID_Y_MASK] = lhid_s3_y;
-    csm_l15_res_data_s3[`PACKET_HOME_ID_X_MASK] = lhid_s3_x;
+    csm_l15_res_data_s3[`PACKET_HOME_ID_Y_MASK] = on_chip_dev_access_s3 ? on_chip_dev_access_y_s3 : lhid_s3_y;
+    csm_l15_res_data_s3[`PACKET_HOME_ID_X_MASK] = on_chip_dev_access_s3 ? on_chip_dev_access_x_s3 : lhid_s3_x;
 end
-
-flat_id_to_xy lhid_to_xy (
-    .flat_id(lhid_s3[`HOME_ID_WIDTH-1:0]),
-    .x_coord(lhid_s3_x),
-    .y_coord(lhid_s3_y)
-    );
 
 `endif
 

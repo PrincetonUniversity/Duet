@@ -89,7 +89,7 @@ module l15_wrap (
     // input from config registers to pipeline
     input [63:0]                            config_l15_read_res_data_s3,
     input                                   config_csm_en,
-    input [5:0]                             config_system_tile_count_5_0,
+    input [31:0]                            config_system_tile_count,
     input [`HOME_ALLOC_METHOD_WIDTH-1:0]    config_home_alloc_method, 
     input [`L15_HMT_BASE_ADDR_WIDTH-1:0]    config_hmt_base,
 
@@ -111,14 +111,20 @@ module l15_wrap (
     output [63:0]                           l15_config_write_req_data_s2,
     output [`CONFIG_REG_ADDRESS_MASK]       l15_config_req_address_s2,
 
+    // flat_id_to_xy interface, used in l15_csm
+    output [`HOME_ID_WIDTH-1:0]             l15csm_flat_id,
+    input  [`NOC_X_WIDTH-1:0]               l15csm_x,
+    input  [`NOC_Y_WIDTH-1:0]               l15csm_y,
+    output [`HOME_ID_WIDTH-1:0]             l15noc1enc_flat_id,
+    input  [`NOC_X_WIDTH-1:0]               l15noc1enc_x,
+    input  [`NOC_Y_WIDTH-1:0]               l15noc1enc_y,
+
     // sram interface
     output [`SRAM_WRAPPER_BUS_WIDTH-1:0]    srams_rtap_data,
     input  [`BIST_OP_WIDTH-1:0]             rtap_srams_bist_command,
     input  [`SRAM_WRAPPER_BUS_WIDTH-1:0]    rtap_srams_bist_data
 );
 
-    wire [31:0]   config_system_tile_count = {26'bx, config_system_tile_count_5_0};
-   
     l15 l15 (
         .clk(clk),
         .rst_n(rst_n),
@@ -202,6 +208,13 @@ module l15_wrap (
         .config_system_tile_count(config_system_tile_count),
         .config_home_alloc_method(config_home_alloc_method),
         
+        .l15csm_flat_id      (l15csm_flat_id),  
+        .l15csm_x            (l15csm_x      ),
+        .l15csm_y            (l15csm_y      ),
+        .l15noc1enc_flat_id  (l15noc1enc_flat_id),  
+        .l15noc1enc_x        (l15noc1enc_x      ),
+        .l15noc1enc_y        (l15noc1enc_y      ),
+
         // sram interfaces
         .srams_rtap_data (srams_rtap_data),
         .rtap_srams_bist_command (rtap_srams_bist_command),
