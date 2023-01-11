@@ -31,6 +31,15 @@ import os
 from pyhplib import *
 import riscvlib
 import time
+import os
+import sys
+
+# Add pyocn/py to python path
+if PITON_NETWORK_CONFIG == "pyocn_config" or PITON_NETWORK_CONFIG == "pyocn_router_config":
+    DV_ROOT = os.getenv( 'DV_ROOT' )
+    assert DV_ROOT is not None, "Environment variable DV_ROOT is not defined!"
+    sys.path.insert( 0, os.path.join( DV_ROOT, 'design/chip/pyocn/py' ) )
+    import pyocn_tile_utils
 
 if PITON_ARIANE:
   devices = pyhplib.ReadDevicesXMLFile()
@@ -41,12 +50,12 @@ if PITON_ARIANE:
     sysFreq = int(os.environ['CONFIG_SYS_FREQ'])
 
   timeStamp = time.strftime("%b %d %Y %H:%M:%S", time.localtime())
-  gen_riscv_dts(devices, PITON_NUM_TILES, sysFreq, sysFreq/128, sysFreq, os.environ['ARIANE_ROOT']+"/openpiton/bootrom/", timeStamp)
-  get_bootrom_info(devices, PITON_NUM_TILES, sysFreq, sysFreq/128, sysFreq, os.environ['ARIANE_ROOT']+"/openpiton/bootrom/", timeStamp)
+  gen_riscv_dts(devices, PITON_RV64_TILES, sysFreq, sysFreq/128, sysFreq, os.environ['ARIANE_ROOT']+"/openpiton/bootrom/", timeStamp)
+  get_bootrom_info(devices, PITON_RV64_TILES, sysFreq, sysFreq/128, sysFreq, os.environ['ARIANE_ROOT']+"/openpiton/bootrom/", timeStamp)
 %>
 
 module tile #(
-     parameter TILE_TYPE = `SPARC_TILE
+     parameter TILE_TYPE = `ARIANE_RV64_TILE
 ) (
     input                               clk,
     input                               rst_n,    // trin: assumed to be synchronous
@@ -54,6 +63,7 @@ module tile #(
     input wire [`NOC_CHIPID_WIDTH-1:0]  default_chipid,
     input wire [`NOC_X_WIDTH-1:0]       default_coreid_x,
     input wire [`NOC_Y_WIDTH-1:0]       default_coreid_y,
+    input wire [31:0]                   default_total_num_tiles,
     input wire [`JTAG_FLATID_WIDTH-1:0] flat_tileid,
 
     // UCB interface for test access port
@@ -177,6 +187,13 @@ if (PITON_NETWORK_CONFIG == "xbar_config"):
     output                              dyn2_do_valid,
     output                              dyn2_yummyOut\
 '''
+
+if PITON_NETWORK_CONFIG == "pyocn_config":
+    s = pyocn_tile_utils.str_tile_noc_ifcs()
+
+if PITON_NETWORK_CONFIG == "pyocn_router_config":
+    s = pyocn_tile_utils.str_router_tile_noc_ifcs()
+
 print(s)
 %>
 
@@ -202,70 +219,73 @@ print(s)
 
     // flop reset signal
     reg rst_n_f;
+    
     always @ (posedge clk)
     begin
       rst_n_f <= rst_n;
     end
 
-    // configured X/Y/CHIPID
-    wire [`NOC_CHIPID_WIDTH-1:0]        config_chipid;
-    wire [`NOC_X_WIDTH-1:0]             config_coreid_x;
-    wire [`NOC_Y_WIDTH-1:0]             config_coreid_y;
-
-    wire [`DATA_WIDTH-1:0]              buffer_processor_data_noc1;
-    wire [`DATA_WIDTH-1:0]              buffer_processor_data_noc2;
-    wire [`DATA_WIDTH-1:0]              buffer_processor_data_noc3;
-
-    wire                                buffer_processor_valid_noc1;
-    wire                                buffer_processor_valid_noc2;
-    wire                                buffer_processor_valid_noc3;
-    wire                                processor_router_ready_noc1;
-    wire                                processor_router_ready_noc2;
-    wire                                processor_router_ready_noc3;
-
-    wire                                router_processor_ready_noc1;
-    wire                                router_processor_ready_noc2;
-    wire                                router_processor_ready_noc3;
-
-    // Processor val/rdy interface
-
-    wire [`NOC_DATA_WIDTH-1:0]          processor_router_data_noc1;
-    wire                                processor_router_valid_noc1;
-    wire                                buffer_router_yummy_noc1;
-
-    wire [`NOC_DATA_WIDTH-1:0]          buffer_router_data_noc1;
-    wire                                buffer_router_valid_noc1;
-
-
-    wire [`NOC_DATA_WIDTH-1:0]          processor_router_data_noc2;
-    wire                                processor_router_valid_noc2;
-    wire                                buffer_router_yummy_noc2;
-
-    wire [`NOC_DATA_WIDTH-1:0]          buffer_router_data_noc2;
-    wire                                buffer_router_valid_noc2;
-
-    wire [`NOC_DATA_WIDTH-1:0]          processor_router_data_noc3;
-    wire                                processor_router_valid_noc3;
-    wire                                buffer_router_yummy_noc3;
-
-    wire [`NOC_DATA_WIDTH-1:0]          buffer_router_data_noc3;
-    wire                                buffer_router_valid_noc3;
-
-    wire [`NOC_DATA_WIDTH-1:0]          router_buffer_data_noc1;
-    wire                                router_buffer_data_val_noc1;
-    wire                                router_buffer_consumed_noc1;
-    wire                                thanksIn_CGNO0;
-
-    wire [`NOC_DATA_WIDTH-1:0]          router_buffer_data_noc2;
-    wire                                router_buffer_data_val_noc2;
-    wire                                router_buffer_consumed_noc2;
-    wire                                thanksIn_CGNO1;
+    // Move the flat_id xy transition out of socket
+    wire [`HOME_ID_WIDTH-1:0]             l15csm_flat_id;
+    wire [`NOC_X_WIDTH-1:0]               l15csm_x      ;
+    wire [`NOC_Y_WIDTH-1:0]               l15csm_y      ;
+    wire [`HOME_ID_WIDTH-1:0]             l15noc1enc_flat_id;
+    wire [`NOC_X_WIDTH-1:0]               l15noc1enc_x      ;
+    wire [`NOC_Y_WIDTH-1:0]               l15noc1enc_y      ;
+    wire [`HOME_ID_WIDTH-1:0]             l2p1s2_flat_id;
+    wire [`NOC_X_WIDTH-1:0]               l2p1s2_x      ;
+    wire [`NOC_Y_WIDTH-1:0]               l2p1s2_y      ;
+    wire [`HOME_ID_WIDTH-1:0]             l2p1s4_flat_id;
+    wire [`NOC_X_WIDTH-1:0]               l2p1s4_x      ;
+    wire [`NOC_Y_WIDTH-1:0]               l2p1s4_y      ;
+    flat_id_to_xy l15csm_flat_id_to_xy (
+        .flat_id    (l15csm_flat_id),
+        .x_coord    (l15csm_x      ),
+        .y_coord    (l15csm_y      )
+    );
+    flat_id_to_xy l15noc1enc_flat_id_to_xy (
+        .flat_id    (l15noc1enc_flat_id),
+        .x_coord    (l15noc1enc_x      ),
+        .y_coord    (l15noc1enc_y      )
+    );
+    xy_to_flat_id l2p1s2_xy_to_flat_id (
+        .flat_id    (l2p1s2_flat_id),
+        .x_coord    (l2p1s2_x      ),
+        .y_coord    (l2p1s2_y      )
+    );
+    flat_id_to_xy l2p1s4_flat_id_to_xy (
+        .flat_id    (l2p1s4_flat_id),
+        .x_coord    (l2p1s4_x      ),
+        .y_coord    (l2p1s4_y      )
+    );
 
 
-    wire [`NOC_DATA_WIDTH-1:0]          router_buffer_data_noc3;
-    wire                                router_buffer_data_val_noc3;
-    wire                                router_buffer_consumed_noc3;
-    wire                                thanksIn_CGNO2;
+    // On-chip devices
+
+<%
+s = '''
+    wire                          splitter_dev_DEVID_vr_noc_NOCID_val;
+    wire  [`NOC_DATA_WIDTH-1:0]   splitter_dev_DEVID_vr_noc_NOCID_dat;
+    wire                          splitter_dev_DEVID_vr_noc_NOCID_rdy;
+
+    wire                          dev_DEVID_merger_vr_noc_NOCID_val;
+    wire  [`NOC_DATA_WIDTH-1:0]   dev_DEVID_merger_vr_noc_NOCID_dat;
+    wire                          dev_DEVID_merger_vr_noc_NOCID_rdy;
+'''
+s_noc3 = '''
+    wire                          splitter_dev_DEVID_vr_noc3_val;
+    wire  [`NOC_DATA_WIDTH-1:0]   splitter_dev_DEVID_vr_noc3_dat;
+    wire                          splitter_dev_DEVID_vr_noc3_rdy;
+'''
+for i in range(2):
+    for j in range(1):  # reduce to only one on-chip device port in one tile
+        ss = s.replace("_NOCID", repr(i+1))
+        ss = ss.replace("_DEVID", repr(j+1))
+        print(ss)
+for j in range(1):
+    ss = s_noc3.replace("_DEVID", repr(j+1))
+    print(ss)
+%>
 
     wire   [4:0]                        pcx_transducer_req;
     wire                                pcx_transducer_atomic_req;
@@ -343,55 +363,14 @@ print(s)
     wire                                fpu_arb_data_rdy;
     wire                                fpu_arb_grant;
 
-    wire                                l15_dmbr_l1missIn;
-    wire [`DMBR_TAG_WIDTH-1:0]          l15_dmbr_l1missTag;
-    wire                                l15_dmbr_l2responseIn;
-    wire                                l15_dmbr_l2missIn;
-    wire [`DMBR_TAG_WIDTH-1:0]          l15_dmbr_l2missTag;
-    wire                                dmbr_l15_stall; // outgoing signal stalling L1.5
 
-    wire                                l15_config_req_val_s2;
-    wire                                l15_config_req_rw_s2;
-    wire [63:0]                         l15_config_write_req_data_s2;
-    wire [`CONFIG_REG_ADDRESS_MASK]     l15_config_req_address_s2;
-    wire [63:0]                         config_l15_read_res_data_s3;
-
-
-    wire                                config_dmbr_func_en;
-    wire                                config_dmbr_stall_en;
-    wire                                config_dmbr_proc_ld;
-    wire [`REPLENISH_WIDTH-1:0]         config_dmbr_replenish_cycles;
-    wire [`SCALE_WIDTH-1:0]             config_dmbr_bin_scale;
-    <%
-      for i in range(DMBR_BIN_NUM):
-        print("wire [`CREDIT_WIDTH-1:0] config_dmbr_cred_bin_%d;" % i)
-    %>
-
-    <%
-      for i in range(DMBR_BIN_NUM):
-        print("wire [`CREDIT_WIDTH-1:0] from_dmbr_cred_bin_%d;" % i)
-    %>
-    wire                                config_csm_en;
-    wire [31:0]                         config_system_tile_count;
     wire [`HOME_ALLOC_METHOD_WIDTH-1:0] config_home_alloc_method;
-    wire [`L15_HMT_BASE_ADDR_WIDTH-1:0] config_hmt_base;
+    wire [31:0]                         config_system_tile_count;
+    // configured X/Y/CHIPID
+    wire [`NOC_CHIPID_WIDTH-1:0]        config_chipid;
+    wire [`NOC_X_WIDTH-1:0]             config_coreid_x;
+    wire [`NOC_Y_WIDTH-1:0]             config_coreid_y;
 
-
-    // SRAM wrapper interfaces
-    wire [`SRAM_WRAPPER_BUS_WIDTH-1:0] srams_rtap_data;
-    wire [`BIST_OP_WIDTH-1:0] rtap_srams_bist_command;
-    wire [`SRAM_WRAPPER_BUS_WIDTH-1:0] rtap_srams_bist_data;
-    wire [`SRAM_WRAPPER_BUS_WIDTH-1:0] l15_rtap_data;
-    wire [`SRAM_WRAPPER_BUS_WIDTH-1:0] sparc_rtap_data;
-    wire [`SRAM_WRAPPER_BUS_WIDTH-1:0] l2_rtap_data;
-
-    wire [3:0] rtap_lsu_ctlbits_wr_en;
-    wire [13:0] rtap_lsu_ctlbits_data;
-
-
-    wire        rtap_arb_req_val;
-    wire [63:0] rtap_arb_req_data;
-    wire [1:0]  rtap_arb_req_threadid;
 
     // r/w port for jtag to config regs
     wire rtap_config_req_val;
@@ -400,284 +379,62 @@ print(s)
     wire [`CONFIG_REG_ADDRESS_MASK] rtap_config_req_address;
     wire [63:0] config_rtap_read_res_data;
 
-    /////////////////////////////////////////////////////
-    // Configuration Registers Needing to be Hooked Up //
-    /////////////////////////////////////////////////////
+    // SRAM wrapper interfaces
+    wire [`BIST_OP_WIDTH-1:0] rtap_srams_bist_command;
+    wire [`SRAM_WRAPPER_BUS_WIDTH-1:0] rtap_srams_bist_data;
+    wire [`SRAM_WRAPPER_BUS_WIDTH-1:0] sparc_rtap_data;
 
-    /////////////
-    // Routers //
-    // //////////
+    wire [`SRAM_WRAPPER_BUS_WIDTH-1:0] srams_rtap_data;
+    wire [`SRAM_WRAPPER_BUS_WIDTH-1:0] l15_rtap_data;
+    wire [`SRAM_WRAPPER_BUS_WIDTH-1:0] l2_rtap_data;
+
+    wire        rtap_arb_req_val;
+    wire [63:0] rtap_arb_req_data;
+    wire [1:0]  rtap_arb_req_threadid;
+
 <%
-s = '''
-    dynamic_node_top_wrap user_dynamic_network0
-      (.clk(clk_gated),
-       .reset_in(~rst_n_f),
-       // dataIn (to input blocks)
-       .dataIn_N(dyn0_dataIn_N),
-       .dataIn_E(dyn0_dataIn_E),
-       .dataIn_S(dyn0_dataIn_S),
-       .dataIn_W(dyn0_dataIn_W),
-       .dataIn_P(buffer_router_data_noc1),
-       // validIn (to input blocks)
-       .validIn_N(dyn0_validIn_N),
-       .validIn_E(dyn0_validIn_E),
-       .validIn_S(dyn0_validIn_S),
-       .validIn_W(dyn0_validIn_W),
-       .validIn_P(buffer_router_valid_noc1),
-       // yummy (from nighboring input blocks)
-       .yummyIn_N(dyn0_dNo_yummy),
-       .yummyIn_E(dyn0_dEo_yummy),
-       .yummyIn_S(dyn0_dSo_yummy),
-       .yummyIn_W(dyn0_dWo_yummy),
-       .yummyIn_P(buffer_router_yummy_noc1),
-       // My Absolute Address
-       .myLocX(config_coreid_x),
-       .myLocY(config_coreid_y),
-       .myChipID(config_chipid),
-       //.ec_cfg(15'b0),//ec_dyn_cfg[14:0]),
-       //.store_meter_partner_address_X(5'b0),
-       //.store_meter_partner_address_Y(5'b0),
-       // DataOut (from crossbar)
-       .dataOut_N(dyn0_dNo),
-       .dataOut_E(dyn0_dEo),
-       .dataOut_S(dyn0_dSo),
-       .dataOut_W(dyn0_dWo),
-       .dataOut_P(router_buffer_data_noc1), //data output to processor
-       // validOut (from crossbar)
-       .validOut_N(dyn0_dNo_valid),
-       .validOut_E(dyn0_dEo_valid),
-       .validOut_S(dyn0_dSo_valid),
-       .validOut_W(dyn0_dWo_valid),
-       .validOut_P(router_buffer_data_val_noc1), //data valid to processor
-       // yummyOut (to neighboring output blocks)
-       .yummyOut_N(dyn0_yummyOut_N),
-       .yummyOut_E(dyn0_yummyOut_E),
-       .yummyOut_W(dyn0_yummyOut_W),
-       .yummyOut_S(dyn0_yummyOut_S),
-       .yummyOut_P(router_buffer_consumed_noc1), //yummy out to neighboring
-       // thanksIn (to CGNO)
-       .thanksIn_P(thanksIn_CGNO0));
-       //.external_interrupt(),
-       //.store_meter_ack_partner(),
-       //.store_meter_ack_non_partner(),
-       //.ec_out(ec_dyn0));
-
-    dynamic_node_top_wrap user_dynamic_network1
-      (.clk(clk_gated),
-       .reset_in(~rst_n_f),
-       // dataIn (to input blocks)
-       .dataIn_N(dyn1_dataIn_N),
-       .dataIn_E(dyn1_dataIn_E),
-       .dataIn_S(dyn1_dataIn_S),
-       .dataIn_W(dyn1_dataIn_W),
-       .dataIn_P(buffer_router_data_noc2),
-       // validIn (to input blocks)
-       .validIn_N(dyn1_validIn_N),
-       .validIn_E(dyn1_validIn_E),
-       .validIn_S(dyn1_validIn_S),
-       .validIn_W(dyn1_validIn_W),
-       .validIn_P(buffer_router_valid_noc2),
-       // yummy (from nighboring input blocks)
-       .yummyIn_N(dyn1_dNo_yummy),
-       .yummyIn_E(dyn1_dEo_yummy),
-       .yummyIn_S(dyn1_dSo_yummy),
-       .yummyIn_W(dyn1_dWo_yummy),
-       .yummyIn_P(buffer_router_yummy_noc2),
-       // My Absolute Address
-       .myLocX(config_coreid_x),
-       .myLocY(config_coreid_y),
-       .myChipID(config_chipid),
-       //.ec_cfg(15'b0),//ec_dyn_cfg[14:0]),
-       //.store_meter_partner_address_X(5'b0),
-       //.store_meter_partner_address_Y(5'b0),
-       // DataOut (from crossbar)
-       .dataOut_N(dyn1_dNo),
-       .dataOut_E(dyn1_dEo),
-       .dataOut_S(dyn1_dSo),
-       .dataOut_W(dyn1_dWo),
-       .dataOut_P(router_buffer_data_noc2), //data output to processor
-       // validOut (from crossbar)
-       .validOut_N(dyn1_dNo_valid),
-       .validOut_E(dyn1_dEo_valid),
-       .validOut_S(dyn1_dSo_valid),
-       .validOut_W(dyn1_dWo_valid),
-       .validOut_P(router_buffer_data_val_noc2), //data valid to processor
-       // yummyOut (to neighboring output blocks)
-       .yummyOut_N(dyn1_yummyOut_N),
-       .yummyOut_E(dyn1_yummyOut_E),
-       .yummyOut_W(dyn1_yummyOut_W),
-       .yummyOut_S(dyn1_yummyOut_S),
-       .yummyOut_P(router_buffer_consumed_noc2), //yummy out to neighboring
-       // thanksIn (to CGNO)
-       .thanksIn_P(thanksIn_CGNO1));
-       //.external_interrupt(),
-       //.store_meter_ack_partner(),
-       //.store_meter_ack_non_partner(),
-       //.ec_out(ec_dyn1));
-
-    dynamic_node_top_wrap user_dynamic_network2
-      (.clk(clk_gated),
-       .reset_in(~rst_n_f),
-       // dataIn (to input blocks)
-       .dataIn_N(dyn2_dataIn_N),
-       .dataIn_E(dyn2_dataIn_E),
-       .dataIn_S(dyn2_dataIn_S),
-       .dataIn_W(dyn2_dataIn_W),
-       .dataIn_P(buffer_router_data_noc3),
-       // validIn (to input blocks)
-       .validIn_N(dyn2_validIn_N),
-       .validIn_E(dyn2_validIn_E),
-       .validIn_S(dyn2_validIn_S),
-       .validIn_W(dyn2_validIn_W),
-       .validIn_P(buffer_router_valid_noc3),
-       // yummy (from nighboring input blocks)
-       .yummyIn_N(dyn2_dNo_yummy),
-       .yummyIn_E(dyn2_dEo_yummy),
-       .yummyIn_S(dyn2_dSo_yummy),
-       .yummyIn_W(dyn2_dWo_yummy),
-       .yummyIn_P(buffer_router_yummy_noc3),
-       // My Absolute Address
-       .myLocX(config_coreid_x),
-       .myLocY(config_coreid_y),
-       .myChipID(config_chipid),
-       //.ec_cfg(15'b0),//ec_dyn_cfg[14:0]),
-       //.store_meter_partner_address_X(5'b0),
-       //.store_meter_partner_address_Y(5'b0),
-       // DataOut (from crossbar)
-       .dataOut_N(dyn2_dNo),
-       .dataOut_E(dyn2_dEo),
-       .dataOut_S(dyn2_dSo),
-       .dataOut_W(dyn2_dWo),
-       .dataOut_P(router_buffer_data_noc3), //data output to processor
-       // validOut (from crossbar)
-       .validOut_N(dyn2_dNo_valid),
-       .validOut_E(dyn2_dEo_valid),
-       .validOut_S(dyn2_dSo_valid),
-       .validOut_W(dyn2_dWo_valid),
-       .validOut_P(router_buffer_data_val_noc3), //data valid to processor
-       // yummyOut (to neighboring output blocks)
-       .yummyOut_N(dyn2_yummyOut_N),
-       .yummyOut_E(dyn2_yummyOut_E),
-       .yummyOut_W(dyn2_yummyOut_W),
-       .yummyOut_S(dyn2_yummyOut_S),
-       .yummyOut_P(router_buffer_consumed_noc3), //yummy out to processor
-       // thanksIn (to CGNO)
-       .thanksIn_P(thanksIn_CGNO2));
-       //.external_interrupt(),
-       //.store_meter_ack_partner(),
-       //.store_meter_ack_non_partner(),
-       //.ec_out(ec_dyn2));
-'''
-if (PITON_NETWORK_CONFIG == "xbar_config"):
-  s = '''
-    assign dyn0_do = buffer_router_data_noc1;
-    assign dyn0_do_valid = buffer_router_valid_noc1;
-    assign dyn0_yummyOut = buffer_router_yummy_noc1;
-    assign router_buffer_data_noc1 = dyn0_dataIn;
-    assign router_buffer_data_val_noc1 = dyn0_validIn;
-    assign router_buffer_consumed_noc1 = dyn0_do_yummy;
-
-    assign dyn1_do = buffer_router_data_noc2;
-    assign dyn1_do_valid = buffer_router_valid_noc2;
-    assign dyn1_yummyOut = buffer_router_yummy_noc2;
-    assign router_buffer_data_noc2 = dyn1_dataIn;
-    assign router_buffer_data_val_noc2 = dyn1_validIn;
-    assign router_buffer_consumed_noc2 = dyn1_do_yummy;
-
-    assign dyn2_do = buffer_router_data_noc3;
-    assign dyn2_do_valid = buffer_router_valid_noc3;
-    assign dyn2_yummyOut = buffer_router_yummy_noc3;
-    assign router_buffer_data_noc3 = dyn2_dataIn;
-    assign router_buffer_data_val_noc3 = dyn2_validIn;
-    assign router_buffer_consumed_noc3 = dyn2_do_yummy;
-'''
-print(s)
+if PITON_NETWORK_CONFIG == "pyocn_router_config":
+    s = pyocn_tile_utils.define_wires_between_socket_and_core()
+    print(s)
 %>
-    ////////////////////////////////////////////
-    // Credit - Val/Rdy Interface Transducers //
-    ///////////////////////////////////////////
-<%
-NIB_SIZE_LOG2 = 4
-if (PITON_NETWORK_CONFIG == "xbar_config"):
-  NIB_SIZE_LOG2 = 2
-NIB_SIZE = pow(2, NIB_SIZE_LOG2)
-%>
-    valrdy_to_credit #(<%= NIB_SIZE%>, <%= NIB_SIZE_LOG2 + 1%>) cgno_blk1(
-        .clk(clk_gated),
-        .reset(~rst_n_f),
-        .data_in(processor_router_data_noc1),
-        .valid_in(processor_router_valid_noc1),
-        .ready_in(router_processor_ready_noc1),
 
-        .data_out(buffer_router_data_noc1),           // Data
-        .valid_out(buffer_router_valid_noc1),       // Val signal
-        .yummy_out(router_buffer_consumed_noc1)    // Yummy signal
-    );
-
-    valrdy_to_credit #(<%= NIB_SIZE%>, <%= NIB_SIZE_LOG2 + 1%>) cgno_blk2(
-        .clk(clk_gated),
-        .reset(~rst_n_f),
-        .data_in(processor_router_data_noc2),
-        .valid_in(processor_router_valid_noc2),
-        .ready_in(router_processor_ready_noc2),
-
-        .data_out(buffer_router_data_noc2),           // Data
-        .valid_out(buffer_router_valid_noc2),       // Val signal
-        .yummy_out(router_buffer_consumed_noc2)    // Yummy signal
-    );
-
-    valrdy_to_credit #(<%= NIB_SIZE%>, <%= NIB_SIZE_LOG2 + 1%>) cgno_blk3(
-        .clk(clk_gated),
-        .reset(~rst_n_f),
-        .data_in(processor_router_data_noc3),
-        .valid_in(processor_router_valid_noc3),
-        .ready_in(router_processor_ready_noc3),
-
-        .data_out(buffer_router_data_noc3),           // Data
-        .valid_out(buffer_router_valid_noc3),       // Val signal
-        .yummy_out(router_buffer_consumed_noc3)    // Yummy signal
-    );
-
-
-    credit_to_valrdy cgni_blk1(
-        .clk(clk_gated),
-        .reset(~rst_n_f),
-        .data_in(router_buffer_data_noc1),
-        .valid_in(router_buffer_data_val_noc1),
-        .yummy_in(buffer_router_yummy_noc1),
-
-        .data_out(buffer_processor_data_noc1),           // Data
-        .valid_out(buffer_processor_valid_noc1),       // Val signal from dynamic network to processor
-        .ready_out(processor_router_ready_noc1)    // Rdy signal from processor to dynamic network
-    );
-
-    credit_to_valrdy cgni_blk2(
-        .clk(clk_gated),
-        .reset(~rst_n_f),
-        .data_in(router_buffer_data_noc2),
-        .valid_in(router_buffer_data_val_noc2),
-        .yummy_in(buffer_router_yummy_noc2),
-
-        .data_out(buffer_processor_data_noc2),           // Data
-        .valid_out(buffer_processor_valid_noc2),       // Val signal from dynamic network to processor
-        .ready_out(processor_router_ready_noc2)    // Rdy signal from processor to dynamic network
-    );
-
-    credit_to_valrdy cgni_blk3(
-        .clk(clk_gated),
-        .reset(~rst_n_f),
-        .data_in(router_buffer_data_noc3),
-        .valid_in(router_buffer_data_val_noc3),
-        .yummy_in(buffer_router_yummy_noc3),
-
-        .data_out(buffer_processor_data_noc3),           // Data
-        .valid_out(buffer_processor_valid_noc3),       // Val signal from dynamic network to processor
-        .ready_out(processor_router_ready_noc3)    // Rdy signal from processor to dynamic network
-    );
 
 ///////////////////////
 // Instantiate Cores //
 ///////////////////////
+
+<%
+if PITON_NETWORK_CONFIG == "pyocn_router_config":
+    s = pyocn_tile_utils.feed_through_connection()
+    print(s)
+%>
+
+// configuration set in it's own generate block
+generate
+if ( TILE_TYPE == `SPARC_TILE || TILE_TYPE == `PICORV32_TILE || TILE_TYPE == `ARIANE_RV64_TILE) begin: g_default_unused_ports_connect
+    // On-chip devices NoC connection
+    // Wire up unused pins of splitter/merger
+    // Configure the splitter and merger
+<%
+s = '''
+    assign splitter_dev_DEVID_vr_noc_NOCID_rdy = 1'b0;
+    assign dev_DEVID_merger_vr_noc_NOCID_val = 1'b0;
+    assign dev_DEVID_merger_vr_noc_NOCID_dat = {`NOC_DATA_WIDTH{1'b0}};
+'''
+s_noc3 = '''
+    assign splitter_dev_DEVID_vr_noc3_rdy = 1'b0;
+'''
+for i in range(2):
+    for j in range(1):
+        ss = s.replace("_NOCID", repr(i+1))
+        ss = ss.replace("_DEVID", repr(j+1))
+        print(ss)
+for j in range(1):
+    ss = s_noc3.replace("_DEVID", repr(j+1))
+    print(ss)
+%>
+end
+endgenerate
 generate
 if (TILE_TYPE == `SPARC_TILE) begin : g_sparc_core
 `ifdef PITON_OST1
@@ -703,11 +460,11 @@ if (TILE_TYPE == `SPARC_TILE) begin : g_sparc_core
        .rtap_srams_bist_command (rtap_srams_bist_command),
        .rtap_srams_bist_data (rtap_srams_bist_data),
 
-       .core_rtap_data          (core_rtap_data),
+       .core_rtap_data        (core_rtap_data),
        .rtap_core_val         (rtap_core_val),
-       .rtap_core_threadid         (rtap_core_threadid),
-       .rtap_core_id         (rtap_core_id),
-       .rtap_core_data         (rtap_core_data[47:0])
+       .rtap_core_threadid    (rtap_core_threadid),
+       .rtap_core_id          (rtap_core_id),
+       .rtap_core_data        (rtap_core_data[47:0])
 
     );
 
@@ -1072,13 +829,30 @@ print(str)
   endgenerate
 
 
-    //////////
-    // L1.5 //
-    //////////
+    ////////////
+    // Socket //
+    ////////////
 
-    l15_wrap l15(
-        .clk(clk_gated),
-        .rst_n(spc_grst_l),
+    socket socket_inst(
+        .clk_gated(clk_gated),
+        .rst_n_f(rst_n_f),
+        .spc_grst_l(spc_grst_l),
+
+        .default_chipid             (default_chipid),
+        .default_coreid_x           (default_coreid_x),
+        .default_coreid_y           (default_coreid_y),
+        .default_total_num_tiles    (default_total_num_tiles),
+
+        .rtap_srams_bist_command    (rtap_srams_bist_command),
+        .rtap_srams_bist_data       (rtap_srams_bist_data),
+        .l15_rtap_data              (l15_rtap_data),
+        .l2_rtap_data               (l2_rtap_data),
+
+        .rtap_config_req_val (rtap_config_req_val),
+        .rtap_config_req_rw (rtap_config_req_rw),
+        .rtap_config_write_req_data (rtap_config_write_req_data),
+        .rtap_config_req_address (rtap_config_req_address),
+        .config_rtap_read_res_data (config_rtap_read_res_data),
 
         .transducer_l15_rqtype              (transducer_l15_rqtype),
         .transducer_l15_amo_op              (transducer_l15_amo_op),
@@ -1125,176 +899,184 @@ print(str)
 
         .transducer_l15_req_ack             (transducer_l15_req_ack),
 
+        // flat_id xy convertion
+        .l15csm_flat_id         (l15csm_flat_id),
+        .l15csm_x               (l15csm_x      ),
+        .l15csm_y               (l15csm_y      ),
+        .l15noc1enc_flat_id     (l15noc1enc_flat_id),
+        .l15noc1enc_x           (l15noc1enc_x      ),
+        .l15noc1enc_y           (l15noc1enc_y      ),
+        .l2p1s2_x               (l2p1s2_x      ),
+        .l2p1s2_y               (l2p1s2_y      ),
+        .l2p1s2_flat_id         (l2p1s2_flat_id),
+        .l2p1s4_x               (l2p1s4_x      ),
+        .l2p1s4_y               (l2p1s4_y      ),
+        .l2p1s4_flat_id         (l2p1s4_flat_id),
 
-        .noc1_out_rdy(router_processor_ready_noc1),
-        .noc2_in_val(buffer_processor_valid_noc2),
-        .noc2_in_data(buffer_processor_data_noc2),
-        .noc3_out_rdy(router_processor_ready_noc3),
-        .dmbr_l15_stall(dmbr_l15_stall),
-        .chipid(config_chipid),
-        .coreid_x(config_coreid_x),
-        .coreid_y(config_coreid_y),
-
-        .noc1_out_val(processor_router_valid_noc1),
-        .noc1_out_data(processor_router_data_noc1),
-        .noc2_in_rdy(processor_router_ready_noc2),
-        .noc3_out_val(processor_router_valid_noc3),
-        .noc3_out_data(processor_router_data_noc3),
-        .l15_dmbr_l1missIn(l15_dmbr_l1missIn),
-        .l15_dmbr_l1missTag(l15_dmbr_l1missTag),
-        .l15_dmbr_l2missIn(l15_dmbr_l2missIn),
-        .l15_dmbr_l2missTag(l15_dmbr_l2missTag),
-        .l15_dmbr_l2responseIn(l15_dmbr_l2responseIn),
-
-        // config registers
-        .l15_config_req_val_s2(l15_config_req_val_s2),
-        .l15_config_req_rw_s2(l15_config_req_rw_s2),
-        .l15_config_write_req_data_s2(l15_config_write_req_data_s2),
-        .l15_config_req_address_s2(l15_config_req_address_s2),
-        .config_l15_read_res_data_s3(config_l15_read_res_data_s3),
-
-        // config regs
-        .config_csm_en(config_csm_en),
-        .config_hmt_base(config_hmt_base),
-        .config_system_tile_count_5_0(config_system_tile_count[5:0]),
-        .config_home_alloc_method(config_home_alloc_method),
-
-        // sram interfaces
-        .srams_rtap_data (l15_rtap_data),
-        .rtap_srams_bist_command (rtap_srams_bist_command),
-        .rtap_srams_bist_data (rtap_srams_bist_data)
-    );
-
-    //////////
-    // DMBR //
-    //////////
-
-    dmbr dmbr_ins (
-        .clk                  (clk_gated                      ),
-        .rst                  (~spc_grst_l              ),
-        .func_en              (config_dmbr_func_en      ),
-        .stall_en             (config_dmbr_stall_en     ),
-        //.dmbr_en(dmbr_en),
-        .proc_ld              (config_dmbr_proc_ld      ),
-
-        //inputs (the credits should take into account credit scaling factor,
-        //which means creditIn_0 should be 1/10 of the original credit) ???
-        // are you shure that a scale factor can be 10? //alavrov
-        <%
-          for i in range(DMBR_BIN_NUM):
-            print(".creditIn_%d\t\t(config_dmbr_cred_bin_%d)," % (i,i))
-        %>
-
-        //scale factor for replenishment (shoud be 1000)
-        .replenishCyclesIn    (config_dmbr_replenish_cycles ),
-
-        //scale factor for arrival interval checking (shoud be 3)
-        .binScaleIn           (config_dmbr_bin_scale        ),
-
-        // Input from L1.5
-        .l1missIn             (l15_dmbr_l1missIn            ),
-        .l1missTag            (l15_dmbr_l1missTag           ),
-
-        // Input from L2
-        .l2missIn             (l15_dmbr_l2missIn            ),
-        .l2missTag            (l15_dmbr_l2missTag           ),
-        .l2responseIn         (l15_dmbr_l2responseIn        ),
-
-        //outputs
-        <%
-        for i in range(DMBR_BIN_NUM):
-          print(".curr_cred_bin_%d\t\t\t(from_dmbr_cred_bin_%d)," % (i,i))
-        %>
-
-        .stallOut             (dmbr_l15_stall           )
-    );
-
-    ////////
-    // L2 //
-    ////////
-
-    l2 l2(
-        .clk(clk_gated),
-        .rst_n(rst_n_f),
-        .chipid(config_chipid),
-        .coreid_x(config_coreid_x),
-        .coreid_y(config_coreid_y),
-        .noc1_valid_in(buffer_processor_valid_noc1),
-        .noc3_valid_in(buffer_processor_valid_noc3),
-        .noc1_data_in(buffer_processor_data_noc1),
-        .noc3_data_in(buffer_processor_data_noc3),
-        .noc2_ready_out(router_processor_ready_noc2),
-
-        .noc1_ready_in(processor_router_ready_noc1),
-        .noc3_ready_in(processor_router_ready_noc3),
-        .noc2_valid_out(processor_router_valid_noc2),
-        .noc2_data_out(processor_router_data_noc2),
-
-        // interface to srams
-        .srams_rtap_data (l2_rtap_data),
-        .rtap_srams_bist_command (rtap_srams_bist_command),
-        .rtap_srams_bist_data (rtap_srams_bist_data)
-    );
-
-    ////////////////////////////////////
-    // Uncore Configuration Registers //
-    ////////////////////////////////////
-
-    config_regs uncore_config(
-        .clk                          (clk_gated                          ),
-        .rst_n                        (rst_n_f                        ),
-
-        .l15_config_req_val_s2        (l15_config_req_val_s2        ),
-        .l15_config_req_rw_s2         (l15_config_req_rw_s2         ),
-        .l15_config_write_req_data_s2 (l15_config_write_req_data_s2 ),
-        .l15_config_req_address_s2    (l15_config_req_address_s2    ),
-        .config_l15_read_res_data_s3  (config_l15_read_res_data_s3  ),
-
-        .default_chipid               (default_chipid               ),
-        .default_coreid_x             (default_coreid_x             ),
-        .default_coreid_y             (default_coreid_y             ),
-
-        .config_hmt_base              (config_hmt_base              ),
-
-        .config_dmbr_func_en          (config_dmbr_func_en          ),
-        .config_dmbr_stall_en         (config_dmbr_stall_en         ),
-        .config_dmbr_proc_ld          (config_dmbr_proc_ld          ),
-        .config_dmbr_replenish_cycles (config_dmbr_replenish_cycles ),
-        .config_dmbr_bin_scale        (config_dmbr_bin_scale        ),
-
-        // config_registers -> DMBR
-        <%
-          for i in range(DMBR_BIN_NUM):
-            print(".config_dmbr_cred_bin_%d\t\t\t(config_dmbr_cred_bin_%d)," % (i,i))
-        %>
-
-        // DMBR -> config registers
-        <%
-          for i in range(DMBR_BIN_NUM):
-            print(".from_dmbr_cred_bin_%d\t\t\t(from_dmbr_cred_bin_%d)," % (i,i))
-        %>
-
-        .config_csm_en                (config_csm_en                ),
         .config_system_tile_count     (config_system_tile_count     ),
         .config_home_alloc_method     (config_home_alloc_method     ),
         .config_chipid                (config_chipid                ),
         .config_coreid_x              (config_coreid_x              ),
         .config_coreid_y              (config_coreid_y              ),
 
-        // jtag-config_regs interface
-        .rtap_config_req_val (rtap_config_req_val),
-        .rtap_config_req_rw (rtap_config_req_rw),
-        .rtap_config_write_req_data (rtap_config_write_req_data),
-        .rtap_config_req_address (rtap_config_req_address),
-        .config_rtap_read_res_data (config_rtap_read_res_data)
+        // On-chip devices
+<%
+s = '''
+        .splitter_dst_PORTID_vr_noc_NOCID_val   (splitter_dev_DEVID_vr_noc_NOCID_val),
+        .splitter_dst_PORTID_vr_noc_NOCID_dat   (splitter_dev_DEVID_vr_noc_NOCID_dat),
+        .splitter_dst_PORTID_vr_noc_NOCID_rdy   (splitter_dev_DEVID_vr_noc_NOCID_rdy),
+
+        .src_PORTID_merger_vr_noc_NOCID_val     (dev_DEVID_merger_vr_noc_NOCID_val  ),
+        .src_PORTID_merger_vr_noc_NOCID_dat     (dev_DEVID_merger_vr_noc_NOCID_dat  ),
+        .src_PORTID_merger_vr_noc_NOCID_rdy     (dev_DEVID_merger_vr_noc_NOCID_rdy  ),
+'''
+s_noc3 = '''
+        .splitter_dst_PORTID_vr_noc3_val   (splitter_dev_DEVID_vr_noc3_val),
+        .splitter_dst_PORTID_vr_noc3_dat   (splitter_dev_DEVID_vr_noc3_dat),
+        .splitter_dst_PORTID_vr_noc3_rdy   (splitter_dev_DEVID_vr_noc3_rdy),
+'''
+for i in range(2):
+    for j in range(1):  # only one on-chip device port in one tile
+        ss = s.replace("_NOCID", repr(i+1))
+        ss = ss.replace("_PORTID", repr(j+1))
+        ss = ss.replace("_DEVID", repr(j+1))
+        print(ss)
+for j in range(1):
+    ss = s_noc3.replace("_PORTID", repr(j+1))
+    ss = ss.replace("_DEVID", repr(j+1))
+    print(ss)
+%>
+
+        // NoC connection
+<%
+s = '''
+        // Dynamic Network Inputs 0 (User Dynamic Network)
+        .dyn0_dataIn_N                      (dyn0_dataIn_N),
+        .dyn0_dataIn_E                      (dyn0_dataIn_E),
+        .dyn0_dataIn_W                      (dyn0_dataIn_W),
+        .dyn0_dataIn_S                      (dyn0_dataIn_S),
+        .dyn0_validIn_N                     (dyn0_validIn_N),
+        .dyn0_validIn_E                     (dyn0_validIn_E),
+        .dyn0_validIn_W                     (dyn0_validIn_W),
+        .dyn0_validIn_S                     (dyn0_validIn_S),
+        .dyn0_dNo_yummy                     (dyn0_dNo_yummy),
+        .dyn0_dEo_yummy                     (dyn0_dEo_yummy),
+        .dyn0_dWo_yummy                     (dyn0_dWo_yummy),
+        .dyn0_dSo_yummy                     (dyn0_dSo_yummy),
+
+        // Dynamic Network Inputs 1 (User Dynamic Network)
+        .dyn1_dataIn_N                      (dyn1_dataIn_N),
+        .dyn1_dataIn_E                      (dyn1_dataIn_E),
+        .dyn1_dataIn_W                      (dyn1_dataIn_W),
+        .dyn1_dataIn_S                      (dyn1_dataIn_S),
+        .dyn1_validIn_N                     (dyn1_validIn_N),
+        .dyn1_validIn_E                     (dyn1_validIn_E),
+        .dyn1_validIn_W                     (dyn1_validIn_W),
+        .dyn1_validIn_S                     (dyn1_validIn_S),
+        .dyn1_dNo_yummy                     (dyn1_dNo_yummy),
+        .dyn1_dEo_yummy                     (dyn1_dEo_yummy),
+        .dyn1_dWo_yummy                     (dyn1_dWo_yummy),
+        .dyn1_dSo_yummy                     (dyn1_dSo_yummy),
+
+        // Dynamic Network Inputs 2 (User Dynamic Network)
+        .dyn2_dataIn_N                      (dyn2_dataIn_N),
+        .dyn2_dataIn_E                      (dyn2_dataIn_E),
+        .dyn2_dataIn_W                      (dyn2_dataIn_W),
+        .dyn2_dataIn_S                      (dyn2_dataIn_S),
+        .dyn2_validIn_N                     (dyn2_validIn_N),
+        .dyn2_validIn_E                     (dyn2_validIn_E),
+        .dyn2_validIn_W                     (dyn2_validIn_W),
+        .dyn2_validIn_S                     (dyn2_validIn_S),
+        .dyn2_dNo_yummy                     (dyn2_dNo_yummy),
+        .dyn2_dEo_yummy                     (dyn2_dEo_yummy),
+        .dyn2_dWo_yummy                     (dyn2_dWo_yummy),
+        .dyn2_dSo_yummy                     (dyn2_dSo_yummy),
+
+        // Dynamic network Outputs 0
+        .dyn0_dNo                           (dyn0_dNo),
+        .dyn0_dEo                           (dyn0_dEo),
+        .dyn0_dWo                           (dyn0_dWo),
+        .dyn0_dSo                           (dyn0_dSo),
+        .dyn0_dNo_valid                     (dyn0_dNo_valid),
+        .dyn0_dEo_valid                     (dyn0_dEo_valid),
+        .dyn0_dWo_valid                     (dyn0_dWo_valid),
+        .dyn0_dSo_valid                     (dyn0_dSo_valid),
+        .dyn0_yummyOut_N                    (dyn0_yummyOut_N),
+        .dyn0_yummyOut_E                    (dyn0_yummyOut_E),
+        .dyn0_yummyOut_W                    (dyn0_yummyOut_W),
+        .dyn0_yummyOut_S                    (dyn0_yummyOut_S),
+
+        // Dynamic network Outputs 1
+        .dyn1_dNo                           (dyn1_dNo),
+        .dyn1_dEo                           (dyn1_dEo),
+        .dyn1_dWo                           (dyn1_dWo),
+        .dyn1_dSo                           (dyn1_dSo),
+        .dyn1_dNo_valid                     (dyn1_dNo_valid),
+        .dyn1_dEo_valid                     (dyn1_dEo_valid),
+        .dyn1_dWo_valid                     (dyn1_dWo_valid),
+        .dyn1_dSo_valid                     (dyn1_dSo_valid),
+        .dyn1_yummyOut_N                    (dyn1_yummyOut_N),
+        .dyn1_yummyOut_E                    (dyn1_yummyOut_E),
+        .dyn1_yummyOut_W                    (dyn1_yummyOut_W),
+        .dyn1_yummyOut_S                    (dyn1_yummyOut_S),
+
+        // Dynamic network Outputs 2
+        .dyn2_dNo                           (dyn2_dNo),
+        .dyn2_dEo                           (dyn2_dEo),
+        .dyn2_dWo                           (dyn2_dWo),
+        .dyn2_dSo                           (dyn2_dSo),
+        .dyn2_dNo_valid                     (dyn2_dNo_valid),
+        .dyn2_dEo_valid                     (dyn2_dEo_valid),
+        .dyn2_dWo_valid                     (dyn2_dWo_valid),
+        .dyn2_dSo_valid                     (dyn2_dSo_valid),
+        .dyn2_yummyOut_N                    (dyn2_yummyOut_N),
+        .dyn2_yummyOut_E                    (dyn2_yummyOut_E),
+        .dyn2_yummyOut_W                    (dyn2_yummyOut_W),
+        .dyn2_yummyOut_S                    (dyn2_yummyOut_S)
+
+'''
+if (PITON_NETWORK_CONFIG == "xbar_config"):
+  s = '''
+        //condensed signals
+        .dyn0_dataIn        (dyn0_dataIn),
+        .dyn0_validIn       (dyn0_validIn),
+        .dyn0_do_yummy      (dyn0_do_yummy),
+
+        .dyn1_dataIn        (dyn1_dataIn),
+        .dyn1_validIn       (dyn1_validIn),
+        .dyn1_do_yummy      (dyn1_do_yummy),
+
+        .dyn2_dataIn        (dyn2_dataIn),
+        .dyn2_validIn       (dyn2_validIn),
+        .dyn2_do_yummy      (dyn2_do_yummy),
+
+        .dyn0_do            (dyn0_do),
+        .dyn0_do_valid      (dyn0_do_valid),
+        .dyn0_yummyOut      (dyn0_yummyOut),
+
+        .dyn1_do            (dyn1_do),
+        .dyn1_do_valid      (dyn1_do_valid),
+        .dyn1_yummyOut      (dyn1_yummyOut),
+
+        .dyn2_do            (dyn2_do),
+        .dyn2_do_valid      (dyn2_do_valid),
+        .dyn2_yummyOut      (dyn2_yummyOut)\
+'''
+
+## NOTICE: Dont support PITON_NETWORK_CONFIG==pyocn_config here
+
+if PITON_NETWORK_CONFIG == "pyocn_router_config":
+    s = pyocn_tile_utils.str_router_tile_noc_direct_connect()
+
+print(s)
+%>
+
     );
 
     // RTAP module
 
     // merge sram reponses
-    assign srams_rtap_data = l15_rtap_data
-                                | sparc_rtap_data
-                                | l2_rtap_data;
+    assign srams_rtap_data = l15_rtap_data | l2_rtap_data; //sparc_rtap_data
 
 
     rtap rtap(
@@ -1325,11 +1107,11 @@ print(str)
         .rtap_config_req_address (rtap_config_req_address),
         .config_rtap_read_res_data (config_rtap_read_res_data),
 
-        .core_rtap_data          (core_rtap_data),
+        .core_rtap_data        (core_rtap_data),
         .rtap_core_val         (rtap_core_val),
-        .rtap_core_threadid         (rtap_core_threadid),
-        .rtap_core_id         (rtap_core_id),
-        .rtap_core_data         (rtap_core_data)
-        );
+        .rtap_core_threadid    (rtap_core_threadid),
+        .rtap_core_id          (rtap_core_id),
+        .rtap_core_data        (rtap_core_data)
+    );
 
 endmodule
