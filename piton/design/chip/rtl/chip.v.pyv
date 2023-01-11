@@ -441,9 +441,12 @@ module chip(
            print("wire dummy_out_W_noc%d_yummy = 1'b0;" % (k))
        # make offchip signals
        for k in [1,2,3]:
-           print("wire [`DATA_WIDTH-1:0] offchip_out_S_noc%d_data;" % (k))
-           print("wire offchip_out_S_noc%d_valid;" % (k))
-           print("wire offchip_out_S_noc%d_yummy;" % (k))
+           # print "wire [`DATA_WIDTH-1:0] offchip_out_S_noc%d_data;" % (k)
+           print("wire [`DATA_WIDTH-1:0] offchip_out_E_noc%d_data;" % (k))
+           # print "wire offchip_out_S_noc%d_valid;" % (k)
+           print("wire offchip_out_E_noc%d_valid;" % (k))
+           # print "wire offchip_out_S_noc%d_yummy;" % (k)
+           print("wire offchip_out_E_noc%d_yummy;" % (k))
 %>
 
    //////////////////////
@@ -535,9 +538,9 @@ module chip(
    // Connecting chip_bridge data to tiles/ORAM
 <%
    s = '''
-   assign proc_oram_valid = tile_0_0_out_N_noc2_valid;
-   assign proc_oram_data = tile_0_0_out_N_noc2_data;
-   assign oram_proc_yummy = tile_0_0_out_N_noc3_yummy;'''
+   assign proc_oram_valid = tile_0_0_out_W_noc2_valid;
+   assign proc_oram_data = tile_0_0_out_W_noc2_data;
+   assign oram_proc_yummy = tile_0_0_out_W_noc3_yummy;'''
    if (PITON_NETWORK_CONFIG == "xbar_config"):
        s = r'''
    assign proc_oram_valid = xbar_X_TILES_out_noc2_valid;
@@ -560,9 +563,9 @@ module chip(
    assign oram_offchip_yummy = processor_offchip_noc2_yummy;
 <%
    s = r'''
-   assign processor_offchip_noc1_valid = tile_0_0_out_N_noc1_valid;
-   assign processor_offchip_noc1_data = tile_0_0_out_N_noc1_data;
-   assign offchip_processor_noc1_yummy = tile_0_0_out_N_noc1_yummy;'''
+   assign processor_offchip_noc1_valid = tile_0_0_out_W_noc1_valid;
+   assign processor_offchip_noc1_data = tile_0_0_out_W_noc1_data;
+   assign offchip_processor_noc1_yummy = tile_0_0_out_W_noc1_yummy;'''
    if (PITON_NETWORK_CONFIG == "xbar_config"):
        s = r'''
    assign processor_offchip_noc1_valid = xbar_X_TILES_out_noc1_valid;
@@ -584,9 +587,9 @@ module chip(
    assign processor_offchip_noc2_data = oram_offchip_data;
 <%
    s = r'''
-   assign offchip_processor_noc2_yummy = tile_0_0_out_N_noc2_yummy;
-   assign processor_offchip_noc3_valid = tile_0_0_out_N_noc3_valid;
-   assign processor_offchip_noc3_data = tile_0_0_out_N_noc3_data;'''
+   assign offchip_processor_noc2_yummy = tile_0_0_out_W_noc2_yummy;
+   assign processor_offchip_noc3_valid = tile_0_0_out_W_noc3_valid;
+   assign processor_offchip_noc3_data = tile_0_0_out_W_noc3_data;'''
    if (PITON_NETWORK_CONFIG == "xbar_config"):
        s = r'''
    assign offchip_processor_noc2_yummy = xbar_X_TILES_out_noc2_yummy;
@@ -607,15 +610,15 @@ module chip(
    assign offchip_processor_noc3_yummy = offchip_oram_yummy;
 <%
    s = r'''
-   assign offchip_out_S_noc1_data = offchip_processor_noc1_data;
-   assign offchip_out_S_noc1_valid = offchip_processor_noc1_valid;
-   assign offchip_out_S_noc1_yummy = processor_offchip_noc1_yummy;
-   assign offchip_out_S_noc2_data = offchip_processor_noc2_data;
-   assign offchip_out_S_noc2_valid = offchip_processor_noc2_valid;
-   assign offchip_out_S_noc2_yummy = proc_oram_yummy; //going to processor
-   assign offchip_out_S_noc3_data = oram_proc_data;
-   assign offchip_out_S_noc3_valid = oram_proc_valid;
-   assign offchip_out_S_noc3_yummy = processor_offchip_noc3_yummy;'''
+   assign offchip_out_E_noc1_data = offchip_processor_noc1_data;
+   assign offchip_out_E_noc1_valid = offchip_processor_noc1_valid;
+   assign offchip_out_E_noc1_yummy = processor_offchip_noc1_yummy;
+   assign offchip_out_E_noc2_data = offchip_processor_noc2_data;
+   assign offchip_out_E_noc2_valid = offchip_processor_noc2_valid;
+   assign offchip_out_E_noc2_yummy = proc_oram_yummy; //going to processor
+   assign offchip_out_E_noc3_data = oram_proc_data;
+   assign offchip_out_E_noc3_valid = oram_proc_valid;
+   assign offchip_out_E_noc3_yummy = processor_offchip_noc3_yummy;'''
    if (PITON_NETWORK_CONFIG == "xbar_config"):
        s = r'''
    assign offchip_out_noc1_data = offchip_processor_noc1_data;
@@ -1165,6 +1168,8 @@ module chip(
 
 %>
 
+    wire [31:0] default_total_num_tiles;
+    assign default_total_num_tiles = `PITON_NUM_TILES;
     // Generate tile instances
 <%
     # Notes:
@@ -1174,7 +1179,7 @@ module chip(
     #       _PRGA_ADDITIONAL_WIRES_ is used to add ports specific to `prga_ctrl_tile`
 
     template = r'''
-    tile #(.TILE_TYPE(TYPE_OF_TILE))
+    _TILE_ #(.TILE_TYPE(TYPE_OF_TILE))
     tile0 (
         .clk                (clk_muxed),
         .rst_n              (rst_n_inter_sync),
@@ -1182,6 +1187,7 @@ module chip(
         .default_chipid             (14'b0),    // the first chip
         .default_coreid_x           (COREIDX),
         .default_coreid_y           (COREIDY),
+        .default_total_num_tiles    (default_total_num_tiles      ),
         .flat_tileid                (`JTAG_FLATID_WIDTH'd_FLAT_ID_),
     `ifdef PITON_ARIANE
         .debug_req_i         ( debug_req_i[_FLAT_ID_]   ),
