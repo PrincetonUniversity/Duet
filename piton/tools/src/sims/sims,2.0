@@ -173,7 +173,7 @@ Getopt::Long::Configure ('no_auto_abbrev') ;
         'pal_use_tgseed' => 0,
         'parallel' => 0,
         'ost1' => 0,
-        'ariane' => 0,
+        'ariane' => 1,
         'pico' => 0,
         'pico_het' => 0,
         'post_process_cmd' => [],
@@ -222,7 +222,7 @@ Getopt::Long::Configure ('no_auto_abbrev') ;
         'stub_mask' => "",
         'sys' => "",
         'tg_seed' => -1,
-        'pyocn' => 0,
+        'pyocn' => 1,
         'tmp_dir' => ".",
         'toplevel' => [],
         'tarcopy' => 0,
@@ -367,9 +367,12 @@ die ("DIE. -pico and -pico_het cannot both be set") if ($opt{pico} && $opt{pico_
 if ($opt{prga} ne "") {
     $opt{ariane} = 1 ;
     $opt{pyocn} = 1 ;
-    $opt{network_config} = "pyocn_router_config" ;
 
     die ("DIE. '-prga_rxi_tile={int >= 0}' is required when '-prga=XXX' is specified") if ($opt{prga} ne "" && $opt{prga_rxi_tile} < 0) ;
+}
+
+if ($opt{pyocn}) {
+    $opt{network_config} = "pyocn_router_config" ;
 }
 
 # Setting ost1 by default. This works better than default to 1
