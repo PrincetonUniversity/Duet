@@ -28,10 +28,10 @@
 <%
     import os
 
-    #MAX_THREAD = 128;
-    MAX_TILE = 64;
+    #MAX_THREAD = 256;
+    MAX_TILE = 128;
 
-    PITON_NUM_TILES = int(os.environ.get('PTON_NUM_TILES', '-1'))
+    PITON_NUM_TILES = int(os.environ.get('PITON_NUM_TILES', '-1'))
     #print "//num_tiles:", num_tiles
 
     if PITON_NUM_TILES == -1:
@@ -104,10 +104,18 @@ for i in range(PITON_NUM_TILES):
     `define PICO_CORE%d       `TILE%d.g_picorv32_core.core
     `define CCX_TRANSDUCER%d  `TILE%d.g_sparc_core.ccx_l15_transducer
     `define PICO_TRANSDUCER%d `TILE%d.g_picorv32_core.pico_l15_transducer
+`ifdef NO_PITON_SOCKET
     `define L15_TOP%d         `TILE%d.l15.l15
     `define L15_PIPE%d        `TILE%d.l15.l15.pipeline
     `define DMBR%d            `TILE%d.dmbr_ins
     `define L2_TOP%d          `TILE%d.l2
+`else
+    `define L15_TOP%d         `TILE%d.socket_inst.l15.l15
+    // `define SOCKET_TOP%d      `TILE%d.socket_inst
+    `define L15_PIPE%d        `TILE%d.socket_inst.l15.l15.pipeline
+    `define DMBR%d            `TILE%d.socket_inst.dmbr_ins
+    `define L2_TOP%d          `TILE%d.socket_inst.l2
+`endif
     `define SPARC_REG%d       `SPARC_CORE%d.sparc0.exu.exu.irf.irf
 `ifndef RTL_SPU
     `define FLOATPATH%d       `SPARC_CORE%d.sparc0.ffu.ffu
