@@ -76,7 +76,7 @@ print("`define PITON_Y_TILES %d"   % PITON_Y_TILES)
 `define NOC_FBITS_L1        4'd0
 `define NOC_FBITS_L2        4'd0
 `define NOC_FBITS_FP        4'd0
-`define NOC_FBITS_MEM       4'd5
+`define NOC_FBITS_MEM       4'd2
 `define NOC_FBITS_PRGA      4'h9
 
 `define NOC_NODEID_WIDTH    34
