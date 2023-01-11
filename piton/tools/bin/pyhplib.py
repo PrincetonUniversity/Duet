@@ -24,6 +24,7 @@
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import os
+import sys
 import math
 import xml.etree.ElementTree as ET
 
@@ -40,6 +41,7 @@ PITON_Y_TILES = int(os.environ.get('PITON_Y_TILES', '-1'))
 
 PITON_NUM_TILES = int(os.environ.get('PITON_NUM_TILES', '-1'))
 #print "//num_tiles:", num_tiles
+PITON_RV64_TILES = int(os.environ.get('PITON_RV64_TILES', '-1'))
 
 PITON_NETWORK_CONFIG = (os.environ.get("PITON_NETWORK_CONFIG", "2dmesh_config"))
 
@@ -62,6 +64,10 @@ PITON_OST1     = int(os.environ.get('PITON_OST1', '0'))
 PITON_ARIANE   = int(os.environ.get('PITON_ARIANE', '0'))
 PITON_PICO     = int(os.environ.get('PITON_PICO', '0'))
 PITON_PICO_HET = int(os.environ.get('PITON_PICO_HET', '0'))
+PITON_PRGA     = str(os.environ.get('PITON_PRGA', ''))
+PITON_PRGA_RXI_TILE = int(os.environ.get('PITON_PRGA_RXI_TILE', '-1'))
+PITON_PRGA_YAMI_TILES = list(int(x) for x in os.environ.get('PITON_PRGA_YAMI_TILES', '').split(',') if x)
+PITON_PRGA_MOCK_APP = str(os.environ.get('PITON_PRGA_MOCK_APP', ""))
 
 if PITON_ARIANE or PITON_PICO:
     NUM_THREADS = PITON_NUM_TILES

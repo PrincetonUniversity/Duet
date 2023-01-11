@@ -81,7 +81,7 @@ const char info[] = {
        timeStamp,
        int(os.environ['PITON_X_TILES']),
        int(os.environ['PITON_Y_TILES']),
-       int(os.environ['PITON_NUM_TILES']),
+       int(PITON_RV64_TILES),
        sysFreq,
        os.environ['PITON_NETWORK_CONFIG'],
        int(memLen/1024/1024),
@@ -182,7 +182,7 @@ def gen_riscv_dts(devices, nCpus, cpuFreq, timeBaseFreq, periphFreq, dtsPath, ti
     for i in range(len(devices)):
         if devices[i]["name"] == "mem":
             addrBase = devices[i]["base"]
-            addrLen  = devices[i]["length"]
+            addrLen  = int(devices[i]["length"] / 2)
             tmpStr += '''
     memory@%08x {
         device_type = "memory";
