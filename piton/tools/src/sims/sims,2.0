@@ -178,6 +178,10 @@ Getopt::Long::Configure ('no_auto_abbrev') ;
         'pico_het' => 0,
         'post_process_cmd' => [],
         'pre_process_cmd' => [],
+        'prga' => "",
+        'prga_mock_app' => "",
+        'prga_rxi_tile' => -1,
+        'prga_yami_tiles' => "",
         'reg_count' => 0,
         'regress' => 0,
         'regress_date' => "",
@@ -188,7 +192,7 @@ Getopt::Long::Configure ('no_auto_abbrev') ;
         'result_dir' => "",
         'riv_build' => 0,
         'riv_build_args' => [],
-        'riv_run' => 0,		
+        'riv_run' => 0,
         'rtl_timeout' => 5000,
         'run_diag_pl' => 1,
         'rv32' => 0,
@@ -218,6 +222,7 @@ Getopt::Long::Configure ('no_auto_abbrev') ;
         'stub_mask' => "",
         'sys' => "",
         'tg_seed' => -1,
+        'pyocn' => 0,
         'tmp_dir' => ".",
         'toplevel' => [],
         'tarcopy' => 0,
@@ -336,6 +341,11 @@ GetOptions (\%opt,
             'ariane!',
             'pico!',
             'pico_het!',
+            'prga=s',
+            'prga_mock_app=s',
+            'prga_rxi_tile=i',
+            'prga_yami_tiles=s',
+            'pyocn!',
             'sparcv9!',
             'rv32!',
             'rv64!',
@@ -354,6 +364,14 @@ GetOptions (\%opt,
 die ("DIE. -ariane and -pico/-pico_het cannot be set simultaneously") if ($opt{ariane} && ($opt{pico} || $opt{pico_het})) ;
 die ("DIE. -pico and -pico_het cannot both be set") if ($opt{pico} && $opt{pico_het}) ;
 
+if ($opt{prga} ne "") {
+    $opt{ariane} = 1 ;
+    $opt{pyocn} = 1 ;
+    $opt{network_config} = "pyocn_router_config" ;
+
+    die ("DIE. '-prga_rxi_tile={int >= 0}' is required when '-prga=XXX' is specified") if ($opt{prga} ne "" && $opt{prga_rxi_tile} < 0) ;
+}
+
 # Setting ost1 by default. This works better than default to 1
 # for heterogeneous-ISA stuff
 if (!$opt{pico} && !$opt{ariane}) {
@@ -364,6 +382,18 @@ push (@{$opt{config_cpp_args}}, "-DFLIST_OST1")     if ($opt{ost1} || $opt{pico_
 push (@{$opt{config_cpp_args}}, "-DFLIST_PICO")     if ($opt{pico} || $opt{pico_het}) ;
 push (@{$opt{config_cpp_args}}, "-DFLIST_ARIANE")   if ($opt{ariane}) ;
 push (@{$opt{config_cpp_args}}, "-DFLIST_ORAM")     if ($opt{oram}) ;
+push (@{$opt{config_cpp_args}}, "-DFLIST_PYOCN")    if ($opt{pyocn}) ;
+
+if ($opt{prga} ne "") {
+  my $flist_prga = sprintf "-DPITON_PRGA=%s", $opt{prga};
+  push (@{$opt{config_cpp_args}}, $flist_prga) ;
+}
+
+if ($opt{prga} ne "" && ($opt{prga_mock_app} ne "")) {
+    my $flist_prga_mock_app = sprintf "-DPITON_PRGA_MOCK_APP=%s", $opt{prga_mock_app};
+    push (@{$opt{config_cpp_args}}, $flist_prga_mock_app) ;
+}
+
 
 ################################################################################
 # define $result_dir
@@ -1108,6 +1138,40 @@ sub gen_config
 }
 
 ################################################################################
+# Generate the C header file for PRGA's memory-mapped registers
+################################################################################
+
+sub gen_prga_mmr_chdr
+{
+  open (FH, ">prga_include/prga_mmr.h") or die ("DIE. cannot open file 'prga_include/prga_mmr.h' for writing");
+
+  my @prga_yami_tiles = map( int, split( ",", $opt{prga_yami_tiles} ) );
+
+  print FH "#ifndef PRGA_MMR_H\n" ;
+  print FH "#define PRGA_MMR_H\n\n" ;
+  printf FH "#define PRGA_NUM_YAMI %d\n\n", $#prga_yami_tiles + 2;
+
+  my $rxi_tile_x = $opt{prga_rxi_tile} % $opt{x_tiles};
+  my $rxi_tile_y = $opt{prga_rxi_tile} / $opt{x_tiles};
+  my $rxi_base_addr = 0xE1009 + ($rxi_tile_x << 8) + ($rxi_tile_y << 4);
+  printf FH "static volatile void * PRGA_RXI_BASE_ADDR = (void *)(0x%X8ull << 16);\n", $rxi_base_addr ;
+  printf FH "static volatile void * PRGA_YAMI_BASE_ADDR[PRGA_NUM_YAMI] = {\n    (void *)(0x%X0ull << 16)\n", $rxi_base_addr ;
+
+  for (my $i = 0; $i <= $#prga_yami_tiles; $i = $i + 1) {
+    my $yami_tile_x = $prga_yami_tiles[$i] % $opt{x_tiles};
+    my $yami_tile_y = $prga_yami_tiles[$i] / $opt{x_tiles};
+    my $yami_base_addr = 0xE1009 + ($yami_tile_x << 8) + ($yami_tile_y << 4);
+
+    printf FH "    , (void *)(0x%X0ull << 16)", $yami_base_addr ;
+  }
+
+  print FH "    };\n\n" ;
+  print FH "\n#endif /* #ifndef PRGA_MMR_H */\n" ;
+
+  close (FH);
+}
+
+################################################################################
 # Generate the flist file
 ################################################################################
 
@@ -1119,7 +1183,6 @@ sub gen_flist
 
   foreach my $flist (@{$opt{flist}}) {
     $flist =~ s/\$(\w+)/$ENV{$1}/g ;
-
     # look for IBM flists
     if ($opt{ibm}) {
        my $ibmflist = $flist . ".ibm";
@@ -1177,13 +1240,16 @@ sub gen_flist
            $line = $ibmfile . "\n";
            # print("debug: IBM sram found: $line\n");
       } else {
-        my $linepyv = (split(' ',substr($line, 0, -1)))[-1] . ".pyv";
-        # print("\$linepyv is $linepyv\n");
-        my $linetmp = substr($line, 0, -3) . ".tmp.". substr($line, -2, 1);
-        my $linetmpout = (split(' ',substr($line, 0, -3)))[-1] . ".tmp." . substr($line, -2, 1);
+        my @splitted = split(/\./, $line);
+        my $ext = $splitted[-1];
+
+        my $linepyv = (split(' ', $line))[-1] . ".pyv";
+        my $linetmp = join('.', @splitted[0..$#splitted-1]) . ".tmp." . $ext;
+        my $linetmpout = (split(' ', $linetmp))[-1];
+
         if (-e $linepyv) {
           # print("original is $line\n");
-          system("pyhp.py $linepyv > $linetmpout");
+          !system("pyhp.py $linepyv > $linetmpout") or die("PyHP error!\n");
           $line = $linetmp . "\n";
         }
       }
@@ -1272,19 +1338,25 @@ sub pre_build
   # Generate the flist file
   &gen_flist ();
 
+  # Generate header file for PRGA RXI/YAMI
+  if ($opt{prga} ne "") {
+    system("mkdir -p prga_include");
+    &gen_prga_mmr_chdr ();
+  }
+
   system("cp -f flist $cur_dir");
 
   if($opt{ariane}) {
     print "compiling DTS and bootroms for Ariane...\n";
     !system("cd $ENV{ARIANE_ROOT}/openpiton/bootrom/baremetal && make clean && make all && cd - > /dev/null") or
       die (" Error compiling DTS for ariane.");
-    !system("cd $ENV{ARIANE_ROOT}/openpiton/bootrom/linux && make clean && make all MAX_HARTS=$ENV{PITON_NUM_TILES} && cd - > /dev/null") or
+    !system("cd $ENV{ARIANE_ROOT}/openpiton/bootrom/linux && make clean && make all MAX_HARTS=$ENV{PITON_RV64_TILES} PITON_RV64_X_TILES=$ENV{PITON_RV64_X_TILES} PITON_RV64_Y_TILES=$ENV{PITON_RV64_Y_TILES} && cd - > /dev/null") or
       die (" Error compiling DTS for ariane.");
     print "done\n";
     # currently we have two sources (hardcoded in chipset_impl): UART and Ethernet
     my $num_sources = 2;
     # 2 targets per core (M/S mode)
-    my $num_targets = 2 * $ENV{PITON_NUM_TILES};
+    my $num_targets = 2 * $ENV{PITON_RV64_TILES};
     print "generating PLIC for Ariane with $num_targets targets and $num_sources sources...\n";
     !system("cd $ENV{ARIANE_ROOT}/src/rv_plic/rtl && ./gen_plic_addrmap.py -t $num_targets -s $num_sources > plic_regmap.sv") or
       die (" Error generating PLIC for Ariane.");
@@ -2216,7 +2288,7 @@ sub get_tvers_from_iver {
 sub assemble_diag
 {
     # first clean up the diag area
-    `rm -rf diag.pal diag.s diag.S diag.pl diag.exe mem.image diag.ev symbol.tbl` ;
+    `rm -rf diag.pal diag.s diag.S diag.pl diag.exe diag.dump diag.objdump mem.image diag.ev symbol.tbl` ;
     die "DIE. could not clean up assembly diag run area"  if ($?) ;
 
     # add default path to look for precompiled RISCV 64bit assembly tests diags in case of ariane
@@ -2333,9 +2405,15 @@ sub assemble_diag
       # only recompile if necessary
       if (!$opt{precompiled}) {
         print "$prg: assembling 64bit riscv diag (RV64IMAC)\n" ;
-        my $defs = "-DPITON_NUMTILES=$ENV{PITON_NUM_TILES} ";
+        my $defs = "-DPITON_RV64_TILES=$ENV{PITON_RV64_TILES} ";
+        $defs .= " -DPITON_RV64_X_TILES=$ENV{PITON_RV64_X_TILES} ";
+        $defs .= " -DPITON_RV64_Y_TILES=$ENV{PITON_RV64_Y_TILES} ";
         if ($opt{uart_dmw}) {
           $defs .= " -DPITONSTREAM ";
+        }
+        if ($opt{prga} ne "") {
+          $defs .= sprintf " -I%s/prga_include", File::Spec->rel2abs( $model_path );
+          $defs .= " -DPITON_PRGA";
         }
         foreach my $additional_args (@{$opt{gcc_args}}) {
           $defs .= " ${additional_args}";
@@ -2660,6 +2738,7 @@ sub parse_args
             'log_all!',
             'debug_all!',
             'ibm!',
+            'pyocn!',
             'ed_enable!',
             'ed_sync_method=s',
             'slurm!',
@@ -2791,10 +2870,10 @@ sub parse_args
 
   # set up network_config defines
   if ($opt{network_config}) {
-    if (($opt{network_config} eq "xbar_config") or ($opt{network_config} eq "2dmesh_config")) {
+    if (($opt{network_config} eq "xbar_config") or ($opt{network_config} eq "2dmesh_config") or ($opt{network_config} eq "pyocn_config") or ($opt{network_config} eq "pyocn_router_config") ) {
       $ENV{PITON_NETWORK_CONFIG}=$opt{network_config};
     } else {
-      die ("DIE. network_config can only be xbar_config or 2dmesh_config");
+      die ("DIE. network_config can only be xbar_config, 2dmesh_config, pyocn_config, or pyocn_router_config");
     }
   } else {
     print "$prg: network_config not specified, assuming 2dmesh configuration\n";
@@ -2805,6 +2884,10 @@ sub parse_args
   $ENV{PITON_PICO}     = $opt{pico};
   $ENV{PITON_PICO_HET} = $opt{pico_het};
   $ENV{PITON_ARIANE}   = $opt{ariane};
+  $ENV{PITON_PRGA}     = $opt{prga};
+  $ENV{PITON_PRGA_MOCK_APP}     = $opt{prga_mock_app};
+  $ENV{PITON_PRGA_RXI_TILE}     = $opt{prga_rxi_tile};
+  $ENV{PITON_PRGA_YAMI_TILES}   = $opt{prga_yami_tiles};
   push (@{$opt{config_rtl}}, "PITON_OST1")     if ($opt{ost1});
   push (@{$opt{config_rtl}}, "PITON_PICO")     if ($opt{pico});
   push (@{$opt{config_rtl}}, "PITON_PICO")     if ($opt{pico_het});
@@ -2812,9 +2895,21 @@ sub parse_args
   push (@{$opt{config_rtl}}, "PITON_ARIANE")   if ($opt{ariane});
   push (@{$opt{config_rtl}}, "WT_DCACHE")      if ($opt{ariane});
 
+  if ($opt{prga} ne "") {
+    if ($opt{prga_mock_app} ne "") {
+      my $config_rtl_prga_mock_app = sprintf "PITON_PRGA_MOCK_APP %s", $opt{prga_mock_app} ;
+      push (@{$opt{config_rtl}}, $config_rtl_prga_mock_app) ;
+    }
+
+    push (@{$opt{config_rtl}}, "PITON_PRGA") ;
+  }
+
   my $pton_x_tiles="";
   my $pton_y_tiles="";
   my $pton_num_tiles="";
+  my $pton_rv64_num_tiles=0;
+  my $pton_rv64_x_tiles=0;
+  my $pton_rv64_y_tiles=0;
 
   # conveniently sets up the tile RTL defines for manycore model
   if ($opt{x_tiles} && $opt{y_tiles}) {
@@ -2825,20 +2920,32 @@ sub parse_args
     $pton_y_tiles=$opt{y_tiles};
     $pton_num_tiles=($opt{x_tiles} * $opt{y_tiles});
   } else {
-    print "$prg: x_tiles and y_tiles not defined, assuming x dimension is <= 8\n" ;
-    if (! $opt{num_tile}) {
-        print "$prg: num_tile not defined, assuming just one tile\n" ;
-        $opt{num_tile} = 1;
-    }
+    die( "DIE. You must define -x_tiles=N and -y_tiles=M") ;
+  }
 
-    $pton_x_tiles=(($opt{num_tile}-1)%8)+1;
-    $pton_y_tiles=(($opt{num_tile}-1)/8)+1;
-    $pton_num_tiles=$opt{num_tile};
+  my %prga_yami_tiles = map { int($_) => 1 } split( ",", $opt{prga_yami_tiles} );
+
+  $pton_rv64_x_tiles=$pton_x_tiles;
+  $pton_rv64_y_tiles=$pton_y_tiles;
+
+  if ($opt{prga} ne "") {
+    my $num_yami_tiles = keys %prga_yami_tiles;
+    $pton_rv64_num_tiles = $pton_num_tiles - 1 - $num_yami_tiles;
+  } elsif ($opt{ariane}) {
+    $pton_rv64_num_tiles = $pton_num_tiles; 
   }
 
   for (my $i=0; $i < $pton_num_tiles; $i++) {
     push (@{$opt{config_rtl}}, "RTL_TILE" . $i);
-    if ($opt{pico} || ($opt{pico_het} && ($i % 2 == 1))) {
+    if ($opt{prga} ne "") {
+        if ($i == $opt{prga_rxi_tile}) {
+            push (@{$opt{config_rtl}}, "RTL_PRGA_RXI" . $i);
+        } elsif (exists($prga_yami_tiles{$i})) {
+            push (@{$opt{config_rtl}}, "RTL_PRGA_YAMI" . $i);
+        } else {
+            push (@{$opt{config_rtl}}, "RTL_ARIANE" . $i);
+        }
+    } elsif ($opt{pico} || ($opt{pico_het} && ($i % 2 == 1))) {
         push (@{$opt{config_rtl}}, "RTL_PICO" . $i);
     } elsif ($opt{ariane}) {
         push (@{$opt{config_rtl}}, "RTL_ARIANE" . $i);
@@ -2850,6 +2957,10 @@ sub parse_args
   $ENV{PITON_X_TILES}=$pton_x_tiles;
   $ENV{PITON_Y_TILES}=$pton_y_tiles;
   $ENV{PITON_NUM_TILES}=$pton_num_tiles;
+  $ENV{PITON_RV64_TILES}=$pton_rv64_num_tiles;
+  $ENV{PITON_RV64_X_TILES}=$pton_rv64_x_tiles;
+  $ENV{PITON_RV64_Y_TILES}=$pton_rv64_y_tiles;
+
   if($opt{dynamic_csm}) {
     $ENV{PITON_DYNAMIC_CSM}=$opt{dynamic_csm};
     push (@{$opt{midas_args}}, "-DDYNAMIC_CSM=$opt{dynamic_csm}");
@@ -2859,7 +2970,7 @@ sub parse_args
 
   push (@{$opt{midas_args}}, "-DPITON_X_TILES=$pton_x_tiles");
   push (@{$opt{midas_args}}, "-DPITON_Y_TILES=$pton_y_tiles");
-  push (@{$opt{midas_args}}, "-DPITON_NUM_TILES=$pton_num_tiles");
+  push (@{$opt{midas_args}}, "-DPITON_NUM_TILES=$pton_rv64_num_tiles");
 
   # Alexey: set default value for UART_DIV_LATCH define
   if (index("@{$opt{midas_args}}", "UART_DIV_LATCH") == -1) {
