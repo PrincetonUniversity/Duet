@@ -1,0 +1,690 @@
+`include "l15.tmp.h"
+`include "prga_axi4.vh"
+`include "prga_rxi.vh"
+`include "prga_yami.vh"
+
+`ifdef DEFAULT_NETTYPE_NONE
+`default_nettype none
+`endif
+
+<%
+from riscvlib import *
+from pyhplib import *
+import os
+import sys
+
+# Add pyocn/py to python path
+if PITON_NETWORK_CONFIG == "pyocn_config" or PITON_NETWORK_CONFIG == "pyocn_router_config":
+    DV_ROOT = os.getenv( 'DV_ROOT' )
+    assert DV_ROOT is not None, "Environment variable DV_ROOT is not defined!"
+    sys.path.insert( 0, os.path.join( DV_ROOT, 'design/chip/pyocn/py' ) )
+    import pyocn_tile_utils
+%>
+
+module prga_rxi_core (
+    input wire                                  clk,
+    input wire                                  rst_n,
+
+<% 
+if PITON_NETWORK_CONFIG == "pyocn_router_config":
+    s = '''
+    input [`NOC_DATA_WIDTH-1:0]         dyn0_in_N_dat,
+    input                               dyn0_in_N_val,
+    output                              dyn0_in_N_rdy,
+    input [`NOC_DATA_WIDTH-1:0]         dyn1_in_N_dat,
+    input                               dyn1_in_N_val,
+    output                              dyn1_in_N_rdy,
+    input [`NOC_DATA_WIDTH-1:0]         dyn2_in_N_dat,
+    input                               dyn2_in_N_val,
+    output                              dyn2_in_N_rdy,
+    output [`NOC_DATA_WIDTH-1:0]        dyn0_out_N_dat,
+    output                              dyn0_out_N_val,
+    input                               dyn0_out_N_rdy,
+    output [`NOC_DATA_WIDTH-1:0]        dyn1_out_N_dat,
+    output                              dyn1_out_N_val,
+    input                               dyn1_out_N_rdy,
+    output [`NOC_DATA_WIDTH-1:0]        dyn2_out_N_dat,
+    output                              dyn2_out_N_val,
+    input                               dyn2_out_N_rdy,
+
+    output [`NOC_DATA_WIDTH-1:0]         dyn0_in_N_dat_s2c,
+    output                               dyn0_in_N_val_s2c,
+    input                                dyn0_in_N_rdy_s2c,
+    output [`NOC_DATA_WIDTH-1:0]         dyn1_in_N_dat_s2c,
+    output                               dyn1_in_N_val_s2c,
+    input                                dyn1_in_N_rdy_s2c,
+    output [`NOC_DATA_WIDTH-1:0]         dyn2_in_N_dat_s2c,
+    output                               dyn2_in_N_val_s2c,
+    input                                dyn2_in_N_rdy_s2c,
+    input [`NOC_DATA_WIDTH-1:0]         dyn0_out_N_dat_s2c,
+    input                               dyn0_out_N_val_s2c,
+    output                              dyn0_out_N_rdy_s2c,
+    input [`NOC_DATA_WIDTH-1:0]         dyn1_out_N_dat_s2c,
+    input                               dyn1_out_N_val_s2c,
+    output                              dyn1_out_N_rdy_s2c,
+    input [`NOC_DATA_WIDTH-1:0]         dyn2_out_N_dat_s2c,
+    input                               dyn2_out_N_val_s2c,
+    output                              dyn2_out_N_rdy_s2c,
+    '''
+    print(s)
+%>
+
+    // == NoC Interface ======================================================
+    input wire                                  noc_core_vr_noc1_val,
+    input wire [`NOC_DATA_WIDTH-1:0]            noc_core_vr_noc1_data,
+    output wire                                 core_noc_vr_noc1_rdy,
+
+    output wire                                 core_noc_vr_noc2_val,
+    output wire [`NOC_DATA_WIDTH-1:0]           core_noc_vr_noc2_data,
+    input wire                                  noc_core_vr_noc2_rdy,
+
+    // == Adapter -> L15 =====================================================
+    // Outputs
+    output wire                                 transducer_l15_val,
+    output wire [`L15_THREADID_MASK]            transducer_l15_threadid,
+    output wire [4:0]                           transducer_l15_rqtype,
+    output wire                                 transducer_l15_nc,
+    output wire [2:0]                           transducer_l15_size,
+    output wire [39:0]                          transducer_l15_address,
+    output wire [63:0]                          transducer_l15_data,
+    output wire [`L15_AMO_OP_WIDTH-1:0]         transducer_l15_amo_op,
+    output wire [1:0]                           transducer_l15_l1rplway,
+
+    // ACK
+    input wire                                  l15_transducer_ack,
+    input wire                                  l15_transducer_header_ack,
+
+    // Unused outputs
+    output wire                                 transducer_l15_prefetch,
+    output wire                                 transducer_l15_invalidate_cacheline,    // L1 invalidation
+    output wire                                 transducer_l15_blockstore,
+    output wire                                 transducer_l15_blockinitstore,
+    output wire [63:0]                          transducer_l15_data_next_entry, // unused (for CAS only)
+    output wire [`TLB_CSM_WIDTH-1:0]            transducer_l15_csm_data,        // unused (for CDR only)
+
+    // == L15 -> Adapter =====================================================
+    // Inputs
+    input wire                                  l15_transducer_val,
+    input wire [`L15_THREADID_MASK]             l15_transducer_threadid,
+    input wire [3:0]                            l15_transducer_returntype,
+    input wire [15:4]                           l15_transducer_inval_address_15_4,
+    input wire                                  l15_transducer_inval_dcache_inval,
+    input wire                                  l15_transducer_inval_dcache_all_way,
+    input wire [1:0]                            l15_transducer_inval_way,
+    input wire [63:0]                           l15_transducer_data_0,
+    input wire [63:0]                           l15_transducer_data_1,
+
+    // ACK: Must be asserted in the same cycle when `l15_transducer_val` is asserted
+    output wire                                 transducer_l15_req_ack,
+
+    // == PRGA controller <-> Config backend =================================
+    output wire                                     prog_rst_n,
+    input wire                                      prog_done,
+
+    input wire                                      prog_req_rdy,
+    output wire                                     prog_req_vld,
+    output wire [`PRGA_RXI_PROG_REG_ID_WIDTH-1:0]   prog_req_addr,
+    output wire [`PRGA_RXI_DATA_BYTES-1:0]          prog_req_strb,
+    output wire [`PRGA_RXI_DATA_WIDTH-1:0]          prog_req_data,
+
+    output wire                                     prog_resp_rdy,
+    input wire                                      prog_resp_vld,
+    input wire                                      prog_resp_err,
+    input wire [`PRGA_RXI_DATA_WIDTH-1:0]           prog_resp_data,
+
+    // == Application Control Signals ========================================
+    output wire                                     aclk,
+    output wire                                     arst_n,
+
+    // -- YAMI ---------------------------------------------------------------
+    input wire [`PRGA_RXI_NUM_YAMI-1:0]             yami_err_i,
+    output wire                                     yami_deactivate_o,
+    output wire [`PRGA_RXI_NUM_YAMI-1:0]            yami_activate_o,
+
+    // == RXI <-> Application (Fabric) =======================================
+    output wire                                     app_rst_n,
+    input wire                                      rxi_req_rdy,
+    output wire                                     rxi_req_vld,
+    output wire [`PRGA_RXI_ADDR_WIDTH-1:0]          rxi_req_addr,
+    output wire [`PRGA_RXI_DATA_BYTES-1:0]          rxi_req_strb,
+    output wire [`PRGA_RXI_DATA_WIDTH-1:0]          rxi_req_data,
+
+    output wire                                     rxi_resp_rdy,
+    input wire                                      rxi_resp_vld,
+    input wire [`PRGA_RXI_DATA_WIDTH-1:0]           rxi_resp_data,
+    input wire                                      rxi_resp_sync,
+    input wire [`PRGA_RXI_HSRID_WIDTH-1:0]          rxi_resp_syncaddr,
+    input wire                                      rxi_resp_parity,
+
+    // == YAMI (Interface No. 0) <-> Application (Fabric) ====================
+    output wire                                     yami_fmc_rdy,
+    input wire                                      yami_fmc_vld,
+    input wire [`PRGA_YAMI_MTHREAD_ID_WIDTH-1:0]    yami_fmc_thread_id,
+    input wire [`PRGA_YAMI_REQTYPE_WIDTH-1:0]       yami_fmc_type,
+    input wire [`PRGA_YAMI_SIZE_WIDTH-1:0]          yami_fmc_size,
+    input wire [`PRGA_YAMI_FMC_ADDR_WIDTH-1:0]      yami_fmc_addr,
+    input wire [`PRGA_YAMI_FMC_DATA_WIDTH-1:0]      yami_fmc_data,
+    input wire [`PRGA_YAMI_CACHE_NUM_WAYS_LOG2-1:0] yami_fmc_l1rplway,
+    input wire                                      yami_fmc_parity,
+
+    input wire                                      yami_mfc_rdy,
+    output wire                                     yami_mfc_vld,
+    output wire [`PRGA_YAMI_MTHREAD_ID_WIDTH-1:0]   yami_mfc_thread_id,
+    output wire [`PRGA_YAMI_RESPTYPE_WIDTH-1:0]     yami_mfc_type,
+    output wire [`PRGA_YAMI_MFC_ADDR_WIDTH-1:0]     yami_mfc_addr,
+    output wire [`PRGA_YAMI_MFC_DATA_WIDTH-1:0]     yami_mfc_data,
+    output wire                                     yami_mfc_l1invall,
+    output wire [`PRGA_YAMI_CACHE_NUM_WAYS_LOG2-1:0]    yami_mfc_l1invway
+    );
+
+
+    // =======================================================================
+    // == Feed through NoC wires =============================================
+    // =======================================================================
+<% 
+if PITON_NETWORK_CONFIG == "pyocn_router_config":
+    s = pyocn_tile_utils.feed_through_connection()
+    print(s)
+%>
+
+    // =======================================================================
+    // == NoC Splitter/Merger ================================================
+    // =======================================================================
+
+    // pre-merger/splitter buffer
+    
+    wire                                    noc_core_vr_noc1_val_f;
+    wire [`NOC_DATA_WIDTH-1:0]              noc_core_vr_noc1_data_f;
+    wire                                    core_noc_vr_noc1_rdy_p;
+    
+    prga_valrdy_buf #(
+        .REGISTERED     (1)
+        ,.DECOUPLED     (1)
+        ,.DATA_WIDTH    (`NOC_DATA_WIDTH)
+    ) i_buf_noc_core_noc1 (
+        .clk            (clk)
+        ,.rst           (~rst_n)
+        ,.rdy_o         (core_noc_vr_noc1_rdy)
+        ,.val_i         (noc_core_vr_noc1_val)
+        ,.data_i        (noc_core_vr_noc1_data)
+        ,.rdy_i         (core_noc_vr_noc1_rdy_p)
+        ,.val_o         (noc_core_vr_noc1_val_f)
+        ,.data_o        (noc_core_vr_noc1_data_f)
+        );
+
+    wire                                    core_noc_vr_noc2_val_p;
+    wire [`NOC_DATA_WIDTH-1:0]              core_noc_vr_noc2_data_p;
+    wire                                    noc_core_vr_noc2_rdy_f;
+
+    prga_valrdy_buf #(
+        .REGISTERED     (1)
+        ,.DECOUPLED     (1)
+        ,.DATA_WIDTH    (`NOC_DATA_WIDTH)
+    ) i_buf_core_noc_noc2 (
+        .clk            (clk)
+        ,.rst           (~rst_n)
+        ,.rdy_o         (noc_core_vr_noc2_rdy_f)
+        ,.val_i         (core_noc_vr_noc2_val_p)
+        ,.data_i        (core_noc_vr_noc2_data_p)
+        ,.rdy_i         (noc_core_vr_noc2_rdy)
+        ,.val_o         (core_noc_vr_noc2_val)
+        ,.data_o        (core_noc_vr_noc2_data)
+        );
+
+    // PRGA
+    wire                                    src_prga_vr_noc1_val, src_prga_vr_noc1_val_f;
+    wire [`NOC_DATA_WIDTH-1:0]              src_prga_vr_noc1_data, src_prga_vr_noc1_data_f;
+    wire                                    src_prga_vr_noc1_rdy, src_prga_vr_noc1_rdy_p;
+
+    prga_valrdy_buf #(
+        .REGISTERED     (1)
+        ,.DECOUPLED     (1)
+        ,.DATA_WIDTH    (`NOC_DATA_WIDTH)
+    ) i_buf_src_prga_noc1 (
+        .clk            (clk)
+        ,.rst           (~rst_n)
+        ,.rdy_o         (src_prga_vr_noc1_rdy)
+        ,.val_i         (src_prga_vr_noc1_val)
+        ,.data_i        (src_prga_vr_noc1_data)
+        ,.rdy_i         (src_prga_vr_noc1_rdy_p)
+        ,.val_o         (src_prga_vr_noc1_val_f)
+        ,.data_o        (src_prga_vr_noc1_data_f)
+        );
+
+    wire                                    prga_dst_vr_noc2_val, prga_dst_vr_noc2_val_p;
+    wire [`NOC_DATA_WIDTH-1:0]              prga_dst_vr_noc2_data, prga_dst_vr_noc2_data_p;
+    wire                                    prga_dst_vr_noc2_rdy, prga_dst_vr_noc2_rdy_f;
+
+    prga_valrdy_buf #(
+        .REGISTERED     (1)
+        ,.DECOUPLED     (1)
+        ,.DATA_WIDTH    (`NOC_DATA_WIDTH)
+    ) i_buf_prga_dst_noc2 (
+        .clk            (clk)
+        ,.rst           (~rst_n)
+        ,.rdy_o         (prga_dst_vr_noc2_rdy_f)
+        ,.val_i         (prga_dst_vr_noc2_val_p)
+        ,.data_i        (prga_dst_vr_noc2_data_p)
+        ,.rdy_i         (prga_dst_vr_noc2_rdy)
+        ,.val_o         (prga_dst_vr_noc2_val)
+        ,.data_o        (prga_dst_vr_noc2_data)
+        );
+
+    noc_fbits_splitter prga_ctrl_core_noc1_splitter (
+        .clk                            (clk),
+        .rst_n                          (rst_n),
+
+        .src_splitter_vr_noc_val        (noc_core_vr_noc1_val_f),
+        .src_splitter_vr_noc_dat        (noc_core_vr_noc1_data_f),
+        .src_splitter_vr_noc_rdy        (core_noc_vr_noc1_rdy_p),
+
+        .splitter_dst0_vr_noc_val       (src_prga_vr_noc1_val ),
+        .splitter_dst0_vr_noc_dat       (src_prga_vr_noc1_data),
+        .splitter_dst0_vr_noc_rdy       (src_prga_vr_noc1_rdy ),
+        .fbits_type0                    (`NOC_FBITS_PRGA),
+
+        .splitter_dst3_vr_noc_rdy       (1'b0),
+        .fbits_type3                    (4'd0),
+
+        .splitter_dst4_vr_noc_rdy       (1'b0),
+        .fbits_type4                    (4'd0),
+
+        .num_targets                    (3'd1),
+
+        .splitter_dst1_vr_noc_rdy       (1'b0),
+        .fbits_type1                    (4'd0),
+
+        .splitter_dst2_vr_noc_rdy       (1'b0),
+        .fbits_type2                    (4'd0)
+    );
+
+    noc_prio_merger prga_ctrl_core_noc2_merger (
+        .clk                            (clk),
+        .rst_n                          (rst_n),
+
+        .src0_merger_vr_noc_val         (prga_dst_vr_noc2_val ),
+        .src0_merger_vr_noc_dat         (prga_dst_vr_noc2_data),
+        .src0_merger_vr_noc_rdy         (prga_dst_vr_noc2_rdy ),
+
+        .src3_merger_vr_noc_val         (1'b0                   ),
+        .src3_merger_vr_noc_dat         ({`NOC_DATA_WIDTH{1'b0}}),
+
+        .src4_merger_vr_noc_val         (1'b0                   ),
+        .src4_merger_vr_noc_dat         ({`NOC_DATA_WIDTH{1'b0}}),
+
+        .merger_dst_vr_noc_val          (core_noc_vr_noc2_val_p),
+        .merger_dst_vr_noc_dat          (core_noc_vr_noc2_data_p),
+        .merger_dst_vr_noc_rdy          (noc_core_vr_noc2_rdy_f),
+
+        .num_sources                    (3'd1),
+
+        .src1_merger_vr_noc_val         (1'b0                   ),
+        .src1_merger_vr_noc_dat         ({`NOC_DATA_WIDTH{1'b0}}),
+
+        .src2_merger_vr_noc_val         (1'b0                   ),
+        .src2_merger_vr_noc_dat         ({`NOC_DATA_WIDTH{1'b0}})
+    );
+
+    // =======================================================================
+    // == NoC to AXI4-Lite Transducer ========================================
+    // =======================================================================
+
+    // noc axilite bridge wires
+    wire axi4lite_awvalid, axi4lite_awready, axi4lite_wvalid, axi4lite_wready, axi4lite_bvalid, axi4lite_bready;
+    wire axi4lite_arvalid, axi4lite_arready, axi4lite_rvalid, axi4lite_rready;
+    wire [`NOC_DATA_WIDTH-1:0] axi4lite_awaddr, axi4lite_araddr;
+    wire [`NOC_DATA_WIDTH-1:0] axi4lite_wdata, axi4lite_rdata;
+    wire [`NOC_DATA_WIDTH/8-1:0] axi4lite_wstrb;
+    wire [1:0] axi4lite_rresp, axi4lite_bresp;
+
+    noc_axilite_bridge #(
+        .SLAVE_RESP_BYTEWIDTH               (8)
+        ,.SWAP_ENDIANESS                    (1)
+    ) i_noc2axi4lite_prga (
+        .clk                                (clk)
+        ,.rst                               (~rst_n)
+
+        ,.splitter_bridge_val               (src_prga_vr_noc1_val_f)
+        ,.splitter_bridge_data              (src_prga_vr_noc1_data_f)
+        ,.bridge_splitter_rdy               (src_prga_vr_noc1_rdy_p)
+
+        ,.bridge_splitter_val               (prga_dst_vr_noc2_val_p)
+        ,.bridge_splitter_data              (prga_dst_vr_noc2_data_p)
+        ,.splitter_bridge_rdy               (prga_dst_vr_noc2_rdy_f)
+
+        ,.m_axi_awaddr		                (axi4lite_awaddr)
+        ,.m_axi_awvalid		                (axi4lite_awvalid)
+        ,.m_axi_awready		                (axi4lite_awready)
+
+        ,.m_axi_wdata		                (axi4lite_wdata)
+        ,.m_axi_wstrb		                (axi4lite_wstrb)
+        ,.m_axi_wvalid		                (axi4lite_wvalid)
+        ,.m_axi_wready		                (axi4lite_wready)
+
+        ,.m_axi_araddr		                (axi4lite_araddr)
+        ,.m_axi_arvalid		                (axi4lite_arvalid)
+        ,.m_axi_arready		                (axi4lite_arready)
+
+        ,.m_axi_rdata		                (axi4lite_rdata)
+        ,.m_axi_rresp		                (axi4lite_rresp)
+        ,.m_axi_rvalid		                (axi4lite_rvalid)
+        ,.m_axi_rready		                (axi4lite_rready)
+
+        ,.m_axi_bresp		                (axi4lite_bresp)
+        ,.m_axi_bvalid		                (axi4lite_bvalid)
+        ,.m_axi_bready		                (axi4lite_bready)
+
+        ,.w_reqbuf_size                     ()
+        ,.r_reqbuf_size                     ()
+    );
+
+    // =======================================================================
+    // == AXI4-Lite to SRI Transducer ========================================
+    // =======================================================================
+
+    localparam  OCDR_ADDR_WIDTH = 20;   // on-chip device register address width = 20
+    localparam  SRI_ADDR_WIDTH = OCDR_ADDR_WIDTH - `PRGA_RXI_DATA_BYTES_LOG2;
+
+    wire sri_req_rdy, sri_req_vld, sri_resp_rdy, sri_resp_vld;
+    wire [SRI_ADDR_WIDTH - 1:0]         sri_req_addr;
+    wire [`PRGA_RXI_DATA_BYTES - 1:0]   sri_req_strb;
+    wire [`PRGA_RXI_DATA_WIDTH - 1:0]   sri_req_data, sri_resp_data;
+
+    prga_axi4lite_sri_transducer #(
+        .ADDR_WIDTH         (OCDR_ADDR_WIDTH)
+        ,.DATA_BYTES_LOG2   (`PRGA_RXI_DATA_BYTES_LOG2)
+    ) i_a4l_sri_transducer (
+        .clk                                (clk)
+        ,.rst_n                             (rst_n)
+        
+        ,.a4l_awaddr		                (axi4lite_awaddr[0 +: OCDR_ADDR_WIDTH])
+        ,.a4l_awvalid		                (axi4lite_awvalid)
+        ,.a4l_awready		                (axi4lite_awready)
+        ,.a4l_awprot                        ({ `PRGA_AXI4_AXPROT_WIDTH {1'b0} })
+
+        ,.a4l_wdata		                    (axi4lite_wdata)
+        ,.a4l_wstrb		                    (axi4lite_wstrb)
+        ,.a4l_wvalid		                (axi4lite_wvalid)
+        ,.a4l_wready		                (axi4lite_wready)
+
+        ,.a4l_araddr		                (axi4lite_araddr[0 +: OCDR_ADDR_WIDTH])
+        ,.a4l_arvalid		                (axi4lite_arvalid)
+        ,.a4l_arready		                (axi4lite_arready)
+        ,.a4l_arprot                        ({ `PRGA_AXI4_AXPROT_WIDTH {1'b0} })
+
+        ,.a4l_rdata		                    (axi4lite_rdata)
+        ,.a4l_rresp		                    (axi4lite_rresp)
+        ,.a4l_rvalid		                (axi4lite_rvalid)
+        ,.a4l_rready		                (axi4lite_rready)
+
+        ,.a4l_bresp		                    (axi4lite_bresp)
+        ,.a4l_bvalid		                (axi4lite_bvalid)
+        ,.a4l_bready		                (axi4lite_bready)
+
+        ,.sri_req_rdy                       (sri_req_rdy)
+        ,.sri_req_vld                       (sri_req_vld)
+        ,.sri_req_addr                      (sri_req_addr)
+        ,.sri_req_wstrb                     (sri_req_strb)
+        ,.sri_req_data                      (sri_req_data)
+
+        ,.sri_resp_rdy                      (sri_resp_rdy)
+        ,.sri_resp_vld                      (sri_resp_vld)
+        ,.sri_resp_data                     (sri_resp_data)
+        );
+
+    // =======================================================================
+    // == SRI Demuxer (RXI/YAMI) =============================================
+    // =======================================================================
+    wire yami_req_rdy, yami_req_vld, yami_resp_rdy, yami_resp_vld;
+    wire sys_rxi_req_rdy, sys_rxi_req_vld, sys_rxi_resp_rdy, sys_rxi_resp_vld;
+    wire [SRI_ADDR_WIDTH - 2:0]       yami_req_addr, sys_rxi_req_addr;
+    wire [`PRGA_RXI_DATA_BYTES - 1:0] yami_req_strb, sys_rxi_req_strb;
+    wire [`PRGA_RXI_DATA_WIDTH - 1:0] yami_req_data, yami_resp_data, sys_rxi_req_data, sys_rxi_resp_data;
+
+    prga_sri_demux #(
+        .SLAVE_ADDR_WIDTH   (SRI_ADDR_WIDTH - 1)
+        ,.DATA_BYTES_LOG2   (3)
+    ) i_sri_demux (
+        .clk                                (clk)
+        ,.rst_n                             (rst_n)
+
+        ,.s_req_rdy                         (sri_req_rdy)
+        ,.s_req_vld                         (sri_req_vld)
+        ,.s_req_addr                        (sri_req_addr)
+        ,.s_req_wstrb                       (sri_req_strb)
+        ,.s_req_data                        (sri_req_data)
+
+        ,.s_resp_rdy                        (sri_resp_rdy)
+        ,.s_resp_vld                        (sri_resp_vld)
+        ,.s_resp_data                       (sri_resp_data)
+
+        ,.m0_req_rdy                        (yami_req_rdy)
+        ,.m0_req_vld                        (yami_req_vld)
+        ,.m0_req_addr                       (yami_req_addr)
+        ,.m0_req_wstrb                      (yami_req_strb)
+        ,.m0_req_data                       (yami_req_data)
+
+        ,.m0_resp_rdy                       (yami_resp_rdy)
+        ,.m0_resp_vld                       (yami_resp_vld)
+        ,.m0_resp_data                      (yami_resp_data)
+
+        ,.m1_req_rdy                        (sys_rxi_req_rdy)
+        ,.m1_req_vld                        (sys_rxi_req_vld)
+        ,.m1_req_addr                       (sys_rxi_req_addr)
+        ,.m1_req_wstrb                      (sys_rxi_req_strb)
+        ,.m1_req_data                       (sys_rxi_req_data)
+
+        ,.m1_resp_rdy                       (sys_rxi_resp_rdy)
+        ,.m1_resp_vld                       (sys_rxi_resp_vld)
+        ,.m1_resp_data                      (sys_rxi_resp_data)
+        );
+
+    // =======================================================================
+    // == RXI Controller =====================================================
+    // =======================================================================
+
+    wire                                    yami_err_i0;
+    wire [`PRGA_RXI_NUM_YAMI - 1:0]         yami_err_internal;
+
+    generate if (`PRGA_RXI_NUM_YAMI == 1) begin
+        assign yami_err_internal = yami_err_i0;
+    end else begin
+        assign yami_err_internal = {yami_err_i[`PRGA_RXI_NUM_YAMI - 1:1], yami_err_i0};
+    end endgenerate
+
+    prga_rxi #(
+        .HSR_FIFO_DEPTH_LOG2    (8)
+    ) i_rxi (
+        .clk                                (clk)
+        ,.rst_n                             (rst_n)
+        ,.aclk                              (aclk)
+        ,.arst_n                            (arst_n)
+
+        ,.s_req_rdy                         (sys_rxi_req_rdy)
+        ,.s_req_vld                         (sys_rxi_req_vld)
+        ,.s_req_addr                        (sys_rxi_req_addr[0 +: `PRGA_RXI_ADDR_WIDTH])
+        ,.s_req_strb                        (sys_rxi_req_strb)
+        ,.s_req_data                        (sys_rxi_req_data)
+
+        ,.s_resp_rdy                        (sys_rxi_resp_rdy)
+        ,.s_resp_vld                        (sys_rxi_resp_vld)
+        ,.s_resp_data                       (sys_rxi_resp_data)
+
+        ,.prog_rst_n                        (prog_rst_n)
+        ,.prog_done                         (prog_done)
+
+        ,.prog_req_rdy                      (prog_req_rdy)
+        ,.prog_req_vld                      (prog_req_vld)
+        ,.prog_req_addr                     (prog_req_addr)
+        ,.prog_req_strb                     (prog_req_strb)
+        ,.prog_req_data                     (prog_req_data)
+
+        ,.prog_resp_rdy                     (prog_resp_rdy)
+        ,.prog_resp_vld                     (prog_resp_vld)
+        ,.prog_resp_err                     (prog_resp_err)
+        ,.prog_resp_data                    (prog_resp_data)
+
+        ,.yami_err_i                        (yami_err_internal)
+        ,.yami_deactivate_o                 (yami_deactivate_o)
+        ,.yami_activate_o                   (yami_activate_o)
+
+        ,.app_rst_n                         (app_rst_n)
+
+        ,.m_req_rdy                         (rxi_req_rdy)
+        ,.m_req_vld                         (rxi_req_vld)
+        ,.m_req_addr                        (rxi_req_addr)
+        ,.m_req_strb                        (rxi_req_strb)
+        ,.m_req_data                        (rxi_req_data)
+
+        ,.m_resp_rdy                        (rxi_resp_rdy)
+        ,.m_resp_vld                        (rxi_resp_vld)
+        ,.m_resp_sync                       (rxi_resp_sync)
+        ,.m_resp_syncaddr                   (rxi_resp_syncaddr)
+        ,.m_resp_data                       (rxi_resp_data)
+        ,.m_resp_parity                     (rxi_resp_parity)
+        );
+
+    // =======================================================================
+    // == YAMI-TRI Transducer ================================================
+    // =======================================================================
+
+    wire                                    sys_yami_fmc_rdy;
+    wire                                    sys_yami_fmc_vld;
+    wire [`PRGA_YAMI_MTHREAD_ID_WIDTH-1:0]  sys_yami_fmc_thread_id;
+    wire [`PRGA_YAMI_REQTYPE_WIDTH-1:0]     sys_yami_fmc_type;
+    wire [`PRGA_YAMI_SIZE_WIDTH-1:0]        sys_yami_fmc_size;
+    wire [`PRGA_YAMI_FMC_ADDR_WIDTH-1:0]    sys_yami_fmc_addr;
+    wire [`PRGA_YAMI_FMC_DATA_WIDTH-1:0]    sys_yami_fmc_data;
+    wire [`PRGA_YAMI_CACHE_NUM_WAYS_LOG2-1:0]   sys_yami_fmc_l1rplway;
+
+    wire                                    sys_yami_mfc_rdy;
+    wire                                    sys_yami_mfc_vld;
+    wire [`PRGA_YAMI_MTHREAD_ID_WIDTH-1:0]  sys_yami_mfc_thread_id;
+    wire [`PRGA_YAMI_RESPTYPE_WIDTH-1:0]    sys_yami_mfc_type;
+    wire [`PRGA_YAMI_MFC_ADDR_WIDTH-1:0]    sys_yami_mfc_addr;
+    wire [`PRGA_YAMI_MFC_DATA_WIDTH-1:0]    sys_yami_mfc_data;
+    wire                                    sys_yami_mfc_l1invall;
+    wire [`PRGA_YAMI_CACHE_NUM_WAYS_LOG2-1:0]   sys_yami_mfc_l1invway;
+
+    prga_yami_tri_transducer i_yami_tri_transducer (
+        .clk                                    (clk)
+        ,.rst_n                                 (rst_n)
+        
+        ,.transducer_l15_val                    (transducer_l15_val)
+        ,.transducer_l15_threadid               (transducer_l15_threadid)
+        ,.transducer_l15_rqtype                 (transducer_l15_rqtype)
+        ,.transducer_l15_nc                     (transducer_l15_nc)
+        ,.transducer_l15_size                   (transducer_l15_size)
+        ,.transducer_l15_address                (transducer_l15_address)
+        ,.transducer_l15_data                   (transducer_l15_data)
+        ,.transducer_l15_amo_op                 (transducer_l15_amo_op)
+        ,.transducer_l15_l1rplway               (transducer_l15_l1rplway)
+
+        ,.transducer_l15_prefetch               (transducer_l15_prefetch)
+        ,.transducer_l15_invalidate_cacheline   (transducer_l15_invalidate_cacheline)
+        ,.transducer_l15_blockstore             (transducer_l15_blockstore)
+        ,.transducer_l15_blockinitstore         (transducer_l15_blockinitstore)
+        ,.transducer_l15_data_next_entry        (transducer_l15_data_next_entry)
+        ,.transducer_l15_csm_data               (transducer_l15_csm_data)
+        ,.transducer_l15_req_ack                (transducer_l15_req_ack)
+
+        ,.l15_transducer_ack                    (l15_transducer_ack)
+        ,.l15_transducer_header_ack             (l15_transducer_header_ack)
+
+        ,.l15_transducer_val                    (l15_transducer_val)
+        ,.l15_transducer_threadid               (l15_transducer_threadid)
+        ,.l15_transducer_returntype             (l15_transducer_returntype)
+        ,.l15_transducer_inval_address_15_4     (l15_transducer_inval_address_15_4)
+        ,.l15_transducer_inval_dcache_inval     (l15_transducer_inval_dcache_inval)
+        ,.l15_transducer_inval_dcache_all_way   (l15_transducer_inval_dcache_all_way)
+        ,.l15_transducer_inval_way              (l15_transducer_inval_way)
+        ,.l15_transducer_data_0                 (l15_transducer_data_0)
+        ,.l15_transducer_data_1                 (l15_transducer_data_1)
+
+        ,.fmc_rdy                               (sys_yami_fmc_rdy)
+        ,.fmc_vld                               (sys_yami_fmc_vld)
+        ,.fmc_thread_id                         (sys_yami_fmc_thread_id)
+        ,.fmc_type                              (sys_yami_fmc_type)
+        ,.fmc_size                              (sys_yami_fmc_size)
+        ,.fmc_addr                              (sys_yami_fmc_addr)
+        ,.fmc_data                              (sys_yami_fmc_data)
+        ,.fmc_l1rplway                          (sys_yami_fmc_l1rplway)
+
+        ,.mfc_rdy                               (sys_yami_mfc_rdy)
+        ,.mfc_vld                               (sys_yami_mfc_vld)
+        ,.mfc_thread_id                         (sys_yami_mfc_thread_id)
+        ,.mfc_type                              (sys_yami_mfc_type)
+        ,.mfc_addr                              (sys_yami_mfc_addr)
+        ,.mfc_data                              (sys_yami_mfc_data)
+        ,.mfc_l1invall                          (sys_yami_mfc_l1invall)
+        ,.mfc_l1invway                          (sys_yami_mfc_l1invway)
+        );
+
+    // =======================================================================
+    // == YAMI Controller ====================================================
+    // =======================================================================
+
+    prga_yami #(
+        .DEFAULT_FEATURES   (`PRGA_YAMI_CREG_FEATURE_LOAD
+                             | `PRGA_YAMI_CREG_FEATURE_STORE
+                             | `PRGA_YAMI_CREG_FEATURE_SUBWORD
+                             )
+    ) i_yami (
+        .clk                                    (clk)
+        ,.rst_n                                 (rst_n)
+
+        ,.creg_req_rdy                          (yami_req_rdy)
+        ,.creg_req_vld                          (yami_req_vld)
+        ,.creg_req_strb                         (yami_req_strb)
+        ,.creg_req_addr                         (yami_req_addr)
+        ,.creg_req_data                         (yami_req_data)
+
+        ,.creg_resp_rdy                         (yami_resp_rdy)
+        ,.creg_resp_vld                         (yami_resp_vld)
+        ,.creg_resp_data                        (yami_resp_data)
+
+        ,.sfmc_rdy                              (sys_yami_fmc_rdy)
+        ,.sfmc_vld                              (sys_yami_fmc_vld)
+        ,.sfmc_thread_id                        (sys_yami_fmc_thread_id)
+        ,.sfmc_type                             (sys_yami_fmc_type)
+        ,.sfmc_size                             (sys_yami_fmc_size)
+        ,.sfmc_addr                             (sys_yami_fmc_addr)
+        ,.sfmc_data                             (sys_yami_fmc_data)
+        ,.sfmc_l1rplway                         (sys_yami_fmc_l1rplway)
+
+        ,.smfc_rdy                              (sys_yami_mfc_rdy)
+        ,.smfc_vld                              (sys_yami_mfc_vld)
+        ,.smfc_thread_id                        (sys_yami_mfc_thread_id)
+        ,.smfc_type                             (sys_yami_mfc_type)
+        ,.smfc_addr                             (sys_yami_mfc_addr)
+        ,.smfc_data                             (sys_yami_mfc_data)
+        ,.smfc_l1invall                         (sys_yami_mfc_l1invall)
+        ,.smfc_l1invway                         (sys_yami_mfc_l1invway)
+
+        ,.aclk                                  (aclk)
+        ,.arst_n                                (arst_n)
+        ,.err_o                                 (yami_err_i0)
+        ,.deactivate_i                          (yami_deactivate_o[0])
+        ,.activate_i                            (yami_activate_o[0])
+
+        ,.afmc_rdy                              (yami_fmc_rdy)
+        ,.afmc_vld                              (yami_fmc_vld)
+        ,.afmc_thread_id                        (yami_fmc_thread_id)
+        ,.afmc_type                             (yami_fmc_type)
+        ,.afmc_size                             (yami_fmc_size)
+        ,.afmc_addr                             (yami_fmc_addr)
+        ,.afmc_data                             (yami_fmc_data)
+        ,.afmc_l1rplway                         (yami_fmc_l1rplway)
+        ,.afmc_parity                           (yami_fmc_parity)
+
+        ,.amfc_rdy                              (yami_mfc_rdy)
+        ,.amfc_vld                              (yami_mfc_vld)
+        ,.amfc_thread_id                        (yami_mfc_thread_id)
+        ,.amfc_type                             (yami_mfc_type)
+        ,.amfc_addr                             (yami_mfc_addr)
+        ,.amfc_data                             (yami_mfc_data)
+        ,.amfc_l1invall                         (yami_mfc_l1invall)
+        ,.amfc_l1invway                         (yami_mfc_l1invway)
+        );
+
+endmodule
