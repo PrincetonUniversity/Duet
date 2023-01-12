@@ -1,0 +1,107 @@
+bram    _mmap__dpram_a10d32
+    init    0
+    abits   10
+    dbits   32
+    groups  2
+    ports   1 1
+    wrmode  1 0
+    enable  1 0
+    transp  0 0
+    clocks  1 1
+    clkpol  1 1
+endbram
+
+match   _mmap__dpram_a10d32
+    make_outreg
+    or_next_if_better
+endmatch
+
+bram    _mmap__dpram_a11d16
+    init    0
+    abits   11
+    dbits   16
+    groups  2
+    ports   1 1
+    wrmode  1 0
+    enable  1 0
+    transp  0 0
+    clocks  1 1
+    clkpol  1 1
+endbram
+
+match   _mmap__dpram_a11d16
+    make_outreg
+    or_next_if_better
+endmatch
+
+bram    _mmap__dpram_a12d8
+    init    0
+    abits   12
+    dbits   8
+    groups  2
+    ports   1 1
+    wrmode  1 0
+    enable  1 0
+    transp  0 0
+    clocks  1 1
+    clkpol  1 1
+endbram
+
+match   _mmap__dpram_a12d8
+    make_outreg
+    or_next_if_better
+endmatch
+
+bram    _mmap__dpram_a13d4
+    init    0
+    abits   13
+    dbits   4
+    groups  2
+    ports   1 1
+    wrmode  1 0
+    enable  1 0
+    transp  0 0
+    clocks  1 1
+    clkpol  1 1
+endbram
+
+match   _mmap__dpram_a13d4
+    make_outreg
+    or_next_if_better
+endmatch
+
+bram    _mmap__dpram_a14d2
+    init    0
+    abits   14
+    dbits   2
+    groups  2
+    ports   1 1
+    wrmode  1 0
+    enable  1 0
+    transp  0 0
+    clocks  1 1
+    clkpol  1 1
+endbram
+
+match   _mmap__dpram_a14d2
+    make_outreg
+    or_next_if_better
+endmatch
+
+bram    _mmap__dpram_a15d1
+    init    0
+    abits   15
+    dbits   1
+    groups  2
+    ports   1 1
+    wrmode  1 0
+    enable  1 0
+    transp  0 0
+    clocks  1 1
+    clkpol  1 1
+endbram
+
+match   _mmap__dpram_a15d1
+    make_outreg
+endmatch
+
