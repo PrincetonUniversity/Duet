@@ -869,6 +869,8 @@ if (TILE_TYPE == `PRGA_YAMI_TILE) begin : g_prga_yami_tile
 // PRGA RXI Tile //
 ///////////////////
 
+assign spc_grst_l = rst_n_f;
+
 `ifdef PITON_PRGA
 
     // On-chip devices NoC connection

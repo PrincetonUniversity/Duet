@@ -510,14 +510,14 @@ wire                uart_rst_out_n;
 // Debug
 wire                     ndmreset;    // non-debug module reset
 wire                     dmactive;    // debug module is active
-wire  [`PITON_NUM_TILES-1:0]   debug_req;   // async debug request
-wire  [`PITON_NUM_TILES-1:0]   unavailable; // communicate whether the hart is unavailable (e.g.: power down)
+wire  [`PITON_RV64_TILES-1:0]   debug_req;   // async debug request
+wire  [`PITON_RV64_TILES-1:0]   unavailable; // communicate whether the hart is unavailable (e.g.: power down)
 // CLINT
-wire                     rtc;         // Real-time clock in (usually 32.768 kHz)
-wire  [`PITON_NUM_TILES-1:0]   timer_irq;   // Timer interrupts
-wire  [`PITON_NUM_TILES-1:0]   ipi;         // software interrupt (a.k.a inter-process-interrupt)
+wire                      rtc;         // Real-time clock in (usually 32.768 kHz)
+wire  [`PITON_RV64_TILES-1:0]   timer_irq;   // Timer interrupts
+wire  [`PITON_RV64_TILES-1:0]   ipi;         // software interrupt (a.k.a inter-process-interrupt)
 // PLIC
-wire  [`PITON_NUM_TILES*2-1:0] irq;         // level sensitive IR lines, mip & sip (async)
+wire  [`PITON_RV64_TILES*2-1:0] irq;         // level sensitive IR lines, mip & sip (async)
 
 `endif
 

@@ -435,6 +435,7 @@ for j in range(1):
 %>
 end
 endgenerate
+
 generate
 if (TILE_TYPE == `SPARC_TILE) begin : g_sparc_core
 `ifdef PITON_OST1
