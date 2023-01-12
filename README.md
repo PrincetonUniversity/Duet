@@ -62,9 +62,9 @@ performance difference.
 
 Here we demonstrate how to run Duet Benchmarks with the `popcnt` example. 
 The source code of the RTL for the accelerator is located at
-</piton/design/chip/tile/prga/app/popcnt>.
+[/piton/design/chip/tile/prga/app/popcnt](/piton/design/chip/tile/prga/app/popcnt).
 The C test that calls this accelerator is located at
-</piton/verif/diag/c/prga/popcnt.c>.
+[/piton/verif/diag/c/prga/popcnt.c](/piton/verif/diag/c/prga/popcnt.c).
 
 First, we need to set up the OpenPiton environment and activate the PRGA
 virtual environment.
@@ -78,7 +78,7 @@ cd $PITON_ROOT
 Now we should be in a Python virtual environment. You can exit the environment
 with the `deactivate` command.
 Let us generate the RTL (and other necessary scripts) for the eFPGA fabric.
-In this case we will be using `m2` (</piton/design/chip/tile/prga/fabric/m2>),
+In this case we will be using `m2` ([/piton/design/chip/tile/prga/fabric/m2](/piton/design/chip/tile/prga/fabric/m2)),
 an eFPGA fabric that has two sets of coherent memory interfaces.
 
 ```
@@ -109,9 +109,9 @@ sims -sys=manycore -x_tiles=2 -y_tiles=2 \
 
 A few quick explanations:
 - `-prga=m2` specifies the fabric to use. If you have other fabrics under
-  </piton/design/chip/tile/prga/fabric>, you can choose them instead
+  [/piton/design/chip/tile/prga/fabric](/piton/design/chip/tile/prga/fabric), you can choose them instead
 - `-prga_mock_app=popcnt` specifies the mock app to instantiate. If you have
-  other apps under </piton/design/chip/tile/prga/app>, you can choose them
+  other apps under [/piton/design/chip/tile/prga/app](/piton/design/chip/tile/prga/app), you can choose them
   instead
 - `-x_tiles=2 -y_tiles=2` is necessary in this case, since the fabric `m2`
   requires two on-chip network access points (routers) for the two coherent
@@ -152,7 +152,7 @@ make bitgen
 
 These commands will generate the bitstream, convert to a static C array, and
 generate a header ("popcnt\_bitstr.h") in
-</piton/verif/diag/assembly/include/prga>.
+[/piton/verif/diag/assembly/include/prga](/piton/verif/diag/assembly/include/prga).
 
 We then build the simulator that instantiates the eFPGA fabric without the
 mock app.
