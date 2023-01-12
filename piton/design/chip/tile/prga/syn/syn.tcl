@@ -47,25 +47,21 @@ memory_map
 
 # print memory map report
 stat -width
-write_verilog -norename post_mem.v
 
 # techmap onto library cells read with `read_verilog` above
 techmap -map [file join $generic_script_root multiply.techmap.v]
 techmap -map [file join $generic_script_root adder.techmap.v]
 stat -width
-write_blif -conn -param post_techmap.eblif
 
 # print techmap report
 opt -full
 stat -width
-write_blif -conn -param post_techmap_opt.eblif
 
 # LUT map
 #   to LUT4 only, because adder cannot connect to LUT5/LUT6
 techmap     ;# generic techmap onto basic logic elements
 abc9 -luts 4:4
 opt -full
-write_verilog -norename post_lut4map.v
 
 # print LUT4 map report
 stat -width
