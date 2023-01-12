@@ -1,6 +1,9 @@
 */include
 */rtl
 */vpr
+*/app
+*/config.yaml
+*/bitgen.out
 */Flist.*
 */*.eblif
 */*.log

@@ -1,0 +1,29 @@
+#!/usr/bin/env python
+
+# This script converts histogram.memh file into histogram.h file, which includes
+# const static uint32_t bitstream[], containing data from histogram.memh
+# Written by: Grigory Chirkov, gchirkov@princeton.edu
+# Modified by: Ang Li, angl@princeton.edu
+
+import sys
+
+if len(sys.argv) != 2:
+    raise RuntimeError("Usage: prgamemh2h {INPUT}.memh > {OUTPUT}.h")
+
+print("#include <stdint.h>")
+print("const static uint32_t bitstream[] = {")
+
+first = True
+for line in open(sys.argv[1]):
+    try:
+        v = int(line, 16)
+    except ValueError:
+        continue
+
+    if first:
+        print("0x{:08x}".format(v))
+        first = False
+    else:
+        print(", 0x{:08x}".format(v))
+
+print("};")
