@@ -43,6 +43,12 @@ extern void setStats(int enable);
 // instantiation macros for atomic memory operation (non LR/SC)
 // see also
 // https://github.com/torvalds/linux/blob/ef78e5ec9214376c5cb989f5da70b02d0c117b66/arch/riscv/include/asm/atomic.h#L94
+#define PREFF(mem) \
+  __asm__ __volatile__ ("lw x0, %0": "+A" (mem) :  : "memory");
+
+#define FENCE \
+  __asm__ __volatile__ ("" ::: "memory");
+
 #define ATOMIC_FETCH_OP(ret, mem, i, asm_op, asm_type) \
   __asm__ __volatile__ (                               \
     " amo" #asm_op "." #asm_type " %1, %2, %0"         \
