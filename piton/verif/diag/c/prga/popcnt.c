@@ -1,6 +1,10 @@
 #include "stdint.h"
 #include "stdio.h"
-// #include "stdlib.h"
+
+#ifndef PRGA_MOCK_APP
+#include "popcnt_bitstr.h"
+#endif
+
 #include "prga_rxi.h"
 
 #define     N 64    // Nx 8B numbers
@@ -18,6 +22,9 @@ const rx_regid_t    PRGA_POPCOUNT_SOFTREG_ADDR_LEN      = NA,     // additional 
 
 void init ()
 {
+    if ( load_bitstream() != 0 )
+        exit (1);
+
     // configrue RXI/YAMI
     rx_set_clkdiv( 52 );    // 5.3ns
     rx_activate();
@@ -43,12 +50,21 @@ uint64_t popcount_acc (
         uint32_t    len
         )
 {
-    perf_marker (1024);
     rx_store    (PRGA_POPCOUNT_SOFTREG_ADDR_ADDR, array);
     rx_store    (PRGA_POPCOUNT_SOFTREG_ADDR_LEN,  len);
 
+    // dummy loads to deal with a memory ordering problem:
+    //  Ariane is an in-order processor, but when sending non-cacheable
+    //  requests, it uses the two memory threads provided by Piton L1.5.
+    //  As a result, the load below may use a separate memory thread than the
+    //  writes above. In this case, the L1.5 may send the load request before
+    //  the store. If the accelerator receives the BLOCKING load first, it will
+    //  stall forever
+    for (int i = 4; i-->0;) {
+        rx_load (PRGA_RXI_REGID_SCRATCHPAD);
+    }
+
     uint64_t ret = rx_load(PRGA_POPCOUNT_SOFTREG_ADDR_COUNT);
-    perf_marker (1025);
     return ret;
 }
 
@@ -76,14 +92,12 @@ uint64_t popcount_ref (
         4, 5, 5, 6, 5, 6, 6, 7, 5, 6, 6, 7, 6, 7, 7, 8
     };
 
-    perf_marker (1028);
     uint8_t * array_u8 = (uint8_t *) array;
 
     uint64_t count = 0, len_u8 = len << 3;
     for (uint32_t i = 0; i < len_u8; i++) {
         count += lookup[array_u8[i]];
     }
-    perf_marker (1029);
 
     return count;
 }

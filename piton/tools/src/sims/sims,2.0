@@ -1152,6 +1152,11 @@ sub gen_prga_mmr_chdr
 
   print FH "#ifndef PRGA_MMR_H\n" ;
   print FH "#define PRGA_MMR_H\n\n" ;
+
+  if ($opt{prga_mock_app}) {
+    print FH "#define PRGA_MOCK_APP\n" ;
+  }
+
   printf FH "#define PRGA_NUM_YAMI %d\n\n", $#prga_yami_tiles + 2;
 
   my $rxi_tile_x = $opt{prga_rxi_tile} % $opt{x_tiles};

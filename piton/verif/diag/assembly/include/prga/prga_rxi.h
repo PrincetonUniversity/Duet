@@ -21,14 +21,14 @@ const rx_regid_t    PRGA_RXI_REGID_STATUS           = 0x000ull,
                     PRGA_RXI_REGID_ENABLE_YAMI      = 0x030ull,
 
                     PRGA_RXI_REGID_SCRATCHPAD       = 0x080ull,
-                    PRGA_RXI_REGID_PROG             = 0x0C0ull,
+                    PRGA_RXI_REGID_PROG             = 0x100ull,
 
-                    PRGA_RXI_REGID_HSR_IQ           = 0x100ull,
-                    PRGA_RXI_REGID_HSR_OQ           = 0x120ull,
-                    PRGA_RXI_REGID_HSR_TQ           = 0x140ull,
-                    PRGA_RXI_REGID_HSR_TQ_NB        = 0x160ull,
-                    PRGA_RXI_REGID_HSR_PLAIN        = 0x180ull,
-                    PRGA_RXI_REGID_SOFTREG          = 0x200ull;
+                    PRGA_RXI_REGID_HSR_PLAIN        = 0x200ull,
+                    PRGA_RXI_REGID_HSR_IQ           = 0x400ull,
+                    PRGA_RXI_REGID_HSR_OQ           = 0x500ull,
+                    PRGA_RXI_REGID_HSR_TQ           = 0x600ull,
+                    PRGA_RXI_REGID_HSR_TQ_NB        = 0x700ull,
+                    PRGA_RXI_REGID_SOFTREG          = 0x800ull;
                     
 const yami_regid_t  PRGA_YAMI_CREG_STATUS           = 0x00ull,
                     PRGA_YAMI_CREG_FEATURES         = 0x08ull,
@@ -268,12 +268,55 @@ inline yami_creg_t yami_get_errcode(yami_id_t yami_id) {
     return yami_cload(yami_id, PRGA_YAMI_CREG_ERRCODE);
 }
 
-// -- Performance Marker --
-int pause_perf_marker = 0;
-#define perf_marker( x ) \
-    if (!pause_perf_marker) \
-    asm (   "addi zero,zero," #x ";\n"  \
-            "addi zero,zero," #x ";\n"  \
-        );
+// -- load bitstream --
+int load_bitstream () {
+#ifndef PRGA_MOCK_APP
+    volatile uint64_t uregv;
+
+    // start bitstream loading
+    printf(" |bs ld\n");
+    rx_store_4B( PRGA_RXI_REGID_PROG, 0x01000000 );
+
+    // write bitstream word-by-word
+    for (uint32_t i = 0;
+            i < sizeof(bitstream)/sizeof(bitstream[0]);     // number of element in array
+            ++i)
+    {
+        rx_store_4B( PRGA_RXI_REGID_PROG, bitstream[i] );
+        if ( i % 1024 == 0 ) {  // every 4KB
+            printf( " |%dKB\n", i / 256 );
+
+            if (( uregv = rx_load( PRGA_RXI_REGID_STATUS ) )
+                    == PRGA_RXI_STATUS_ERROR_PROG )
+            {
+                printf( "E|PROG ERR: 0x%016llx\n",
+                        rx_load( PRGA_RXI_REGID_ERRCODE) );
+                return 1;
+            }
+        }
+    }
+
+    // end bitstream loading
+    rx_store_4B( PRGA_RXI_REGID_PROG, 0x02000000 );
+
+    // poll status until prog done/error
+    while (( uregv = rx_load( PRGA_RXI_REGID_STATUS ) )
+            != PRGA_RXI_STATUS_STANDBY )
+    {
+        if ( uregv == PRGA_RXI_STATUS_ERROR_PROG ) {
+            printf( "E|PROG ERR: 0x%016llx\n",
+                    rx_load( PRGA_RXI_REGID_ERRCODE) );
+            return 1;
+        } else if ( uregv != PRGA_RXI_STATUS_PROGRAMMING ) {
+            printf( "E|STATUS: 0x%016llx\n", uregv );
+            return 1;
+        }
+    }
+
+    printf( " |bs dn\n");
+#endif /* #ifndef PRGA_MOCK_APP */
+
+    return 0;
+}
 
 #endif /* #ifndef PRGA_RXI_H */
