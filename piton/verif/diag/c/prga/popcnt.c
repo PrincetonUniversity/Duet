@@ -1,10 +1,7 @@
 #include "stdint.h"
 #include "stdio.h"
 
-#ifndef PRGA_MOCK_APP
-#include "popcnt_bitstr.h"
-#endif
-
+#define BITSTR_H "popcnt_bitstr.h"
 #include "prga_rxi.h"
 
 #define     N 64    // Nx 8B numbers

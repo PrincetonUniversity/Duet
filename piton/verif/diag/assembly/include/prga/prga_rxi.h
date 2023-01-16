@@ -268,6 +268,10 @@ inline yami_creg_t yami_get_errcode(yami_id_t yami_id) {
     return yami_cload(yami_id, PRGA_YAMI_CREG_ERRCODE);
 }
 
+#ifndef PRGA_MOCK_APP
+#include BITSTR_H
+#endif
+
 // -- load bitstream --
 int load_bitstream () {
 #ifndef PRGA_MOCK_APP
