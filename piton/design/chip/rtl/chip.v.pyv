@@ -163,7 +163,7 @@ module chip(
     from pyhplib import *
 
     # Add pyocn/py to python path
-    if PITON_NETWORK_CONFIG == "pyocn_config" or PITON_NETWORK_CONFIG == "pyocn_router_config":
+    if PITON_NETWORK_CONFIG == "pyocn_router_config":
         DV_ROOT = os.getenv( 'DV_ROOT' )
         assert DV_ROOT is not None, "Environment variable DV_ROOT is not defined!"
         sys.path.insert( 0, os.path.join( DV_ROOT, 'design/chip/pyocn/py' ) )
@@ -384,9 +384,6 @@ module chip(
            print("wire offchip_out_noc%d_valid;" % (k))
            print("wire offchip_out_noc%d_yummy;" % (k))
 
-   elif PITON_NETWORK_CONFIG == "pyocn_config":
-     pyocn_chip_utils.print_tile_noc_wires( PITON_X_TILES, PITON_Y_TILES )
-
    elif PITON_NETWORK_CONFIG == "pyocn_router_config":
      pyocn_chip_utils.print_router_tile_wiring( PITON_X_TILES, PITON_Y_TILES )
 
@@ -547,9 +544,6 @@ module chip(
    assign proc_oram_data = xbar_X_TILES_out_noc2_data;
    assign oram_proc_yummy = xbar_X_TILES_out_noc3_yummy;'''
 
-   elif PITON_NETWORK_CONFIG == "pyocn_config":
-       s = pyocn_chip_utils.str_proc_oram()
-
    elif PITON_NETWORK_CONFIG == "pyocn_router_config":
        s = '''
    //---------------------------------------------------------------------
@@ -572,9 +566,6 @@ module chip(
    assign processor_offchip_noc1_data = xbar_X_TILES_out_noc1_data;
    assign offchip_processor_noc1_yummy = xbar_X_TILES_out_noc1_yummy;'''
 
-   elif PITON_NETWORK_CONFIG == "pyocn_config":
-       s = pyocn_chip_utils.str_processor_offchip_noc1()
-
    elif PITON_NETWORK_CONFIG == "pyocn_router_config":
        s = '''
    //---------------------------------------------------------------------
@@ -595,9 +586,6 @@ module chip(
    assign offchip_processor_noc2_yummy = xbar_X_TILES_out_noc2_yummy;
    assign processor_offchip_noc3_valid = xbar_X_TILES_out_noc3_valid;
    assign processor_offchip_noc3_data = xbar_X_TILES_out_noc3_data;'''
-
-   elif PITON_NETWORK_CONFIG == "pyocn_config":
-       s = pyocn_chip_utils.str_processor_offchip_noc3()
 
    elif PITON_NETWORK_CONFIG == "pyocn_router_config":
        s = '''
@@ -630,9 +618,6 @@ module chip(
    assign offchip_out_noc3_data = oram_proc_data;
    assign offchip_out_noc3_valid = oram_proc_valid;
    assign offchip_out_noc3_yummy = processor_offchip_noc3_yummy;'''
-
-   elif PITON_NETWORK_CONFIG == "pyocn_config":
-        s = pyocn_chip_utils.str_offchip_out()
 
    elif PITON_NETWORK_CONFIG == "pyocn_router_config":
         s = r'''
@@ -1053,10 +1038,10 @@ module chip(
    );
    `endif'''
 
-   #if PITON_NETWORK_CONFIG == "pyocn_config" or PITON_NETWORK_CONFIG == "pyocn_router_config":
+   #if PITON_NETWORK_CONFIG == "pyocn_router_config":
    #    s = r'''
    #//---------------------------------------------------------------------
-   #// pyocn_config - does not need the val/rdy-credit adapters
+   #// pyocn_router_config - does not need the val/rdy-credit adapters
    #//---------------------------------------------------------------------'''
 
    print(s)
@@ -1162,10 +1147,6 @@ module chip(
        print(xbartemplate)
        print(xbartemplate.replace("noc1", "noc2"))
        print(xbartemplate.replace("noc1", "noc3"))
-
-   elif PITON_NETWORK_CONFIG == "pyocn_config":
-       pyocn_chip_utils.print_pyocn_instances()
-
 %>
 
     wire [31:0] default_total_num_tiles;
@@ -1281,9 +1262,6 @@ module chip(
 
             if (PITON_NETWORK_CONFIG == "xbar_config"):
                 currenttile = currenttile.replace("in_", "xbar_%d_out_" % i);
-
-            elif PITON_NETWORK_CONFIG == "pyocn_config":
-                currenttile = pyocn_chip_utils.str_tile_template( j, i, PITON_X_TILES, currenttype )
 
             elif PITON_NETWORK_CONFIG == "pyocn_router_config":
                 currenttile += pyocn_chip_utils.str_router_tile_template( j, i, PITON_Y_TILES, PITON_X_TILES, currenttype )

@@ -35,8 +35,6 @@
     print("`define PITON_NUM_TILES " + repr(PITON_NUM_TILES))
     if (PITON_NETWORK_CONFIG == "xbar_config"):
         print("`define XBAR_CONFIG")
-    elif PITON_NETWORK_CONFIG == "pyocn_config":
-        print("`define PYOCN_CONFIG")
     elif PITON_NETWORK_CONFIG == "pyocn_router_config":
         print("`define PYOCN_ROUTER_CONFIG")
 %>
@@ -50,7 +48,6 @@ module manycore_network_mon (
 `ifndef DISABLE_NETWORK_MONITOR
 `ifndef MINIMAL_MONITORING
 `ifndef XBAR_CONFIG
-`ifndef PYOCN_CONFIG
 `ifndef PYOCN_ROUTER_CONFIG
 // check boundary communication
 // There are two parts to the check
@@ -307,7 +304,6 @@ begin
     // end
 end
 `endif // PYOCN_ROUTER_CONFIG
-`endif // PYOCN_CONFIG
 `endif // XBAR_CONFIG
 `endif // MINIMAL_MONITORING
 `endif // DISABLE_NETWORK_MONITOR

@@ -2878,10 +2878,10 @@ sub parse_args
 
   # set up network_config defines
   if ($opt{network_config}) {
-    if (($opt{network_config} eq "xbar_config") or ($opt{network_config} eq "2dmesh_config") or ($opt{network_config} eq "pyocn_config") or ($opt{network_config} eq "pyocn_router_config") ) {
+    if (($opt{network_config} eq "xbar_config") or ($opt{network_config} eq "2dmesh_config") or ($opt{network_config} eq "pyocn_router_config") ) {
       $ENV{PITON_NETWORK_CONFIG}=$opt{network_config};
     } else {
-      die ("DIE. network_config can only be xbar_config, 2dmesh_config, pyocn_config, or pyocn_router_config");
+      die ("DIE. network_config can only be xbar_config, 2dmesh_config, or pyocn_router_config");
     }
   } else {
     print "$prg: network_config not specified, assuming 2dmesh configuration\n";

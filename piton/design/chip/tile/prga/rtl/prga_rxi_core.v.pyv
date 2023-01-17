@@ -14,7 +14,7 @@ import os
 import sys
 
 # Add pyocn/py to python path
-if PITON_NETWORK_CONFIG == "pyocn_config" or PITON_NETWORK_CONFIG == "pyocn_router_config":
+if PITON_NETWORK_CONFIG == "pyocn_router_config":
     DV_ROOT = os.getenv( 'DV_ROOT' )
     assert DV_ROOT is not None, "Environment variable DV_ROOT is not defined!"
     sys.path.insert( 0, os.path.join( DV_ROOT, 'design/chip/pyocn/py' ) )

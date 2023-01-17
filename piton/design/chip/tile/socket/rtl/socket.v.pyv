@@ -35,7 +35,7 @@ import os
 import sys
 
 # Add pyocn/py to python path
-if PITON_NETWORK_CONFIG == "pyocn_config" or PITON_NETWORK_CONFIG == "pyocn_router_config":
+if PITON_NETWORK_CONFIG == "pyocn_router_config":
     DV_ROOT = os.getenv( 'DV_ROOT' )
     assert DV_ROOT is not None, "Environment variable DV_ROOT is not defined!"
     sys.path.insert( 0, os.path.join( DV_ROOT, 'design/chip/pyocn/py' ) )
@@ -278,9 +278,6 @@ if (PITON_NETWORK_CONFIG == "xbar_config"):
     output                              dyn2_do_valid,
     output                              dyn2_yummyOut\
 '''
-
-if PITON_NETWORK_CONFIG == "pyocn_config":
-    s = pyocn_tile_utils.str_tile_noc_ifcs()
 
 if PITON_NETWORK_CONFIG == "pyocn_router_config":
     s = pyocn_tile_utils.str_router_tile_noc_ifcs()
@@ -596,9 +593,6 @@ if (PITON_NETWORK_CONFIG == "xbar_config"):
     assign router_buffer_consumed_noc3 = dyn2_do_yummy;
 '''
 
-if PITON_NETWORK_CONFIG == "pyocn_config":
-    s = pyocn_tile_utils.str_tile_noc_ifcs_connects()
-
 if PITON_NETWORK_CONFIG == "pyocn_router_config":
     s = pyocn_tile_utils.str_router_inst(0) + \
         pyocn_tile_utils.str_router_inst(1) + \
@@ -690,10 +684,10 @@ s = '''\
     );
 '''.format( buffer_size=NIB_SIZE, buffer_bits=NIB_SIZE_LOG2+1 )
 
-if PITON_NETWORK_CONFIG == "pyocn_config" or PITON_NETWORK_CONFIG == "pyocn_router_config":
+if PITON_NETWORK_CONFIG == "pyocn_router_config":
     s = '''
     //--------------------------------------------------------------------
-    // pyocn_config: no val/rdy - credit transducers needed
+    // pyocn_router_config: no val/rdy - credit transducers needed
     //--------------------------------------------------------------------
 '''
 
