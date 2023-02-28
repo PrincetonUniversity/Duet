@@ -6,8 +6,8 @@ Duet promotes the embedded FPGAs (eFPGA) as equal peers with processors on
 the on-chip network and enables fine-grained, reconfigurable hardware
 acceleration.
 
-A paper on Duet has been accepted to HPCA 2023 (
-[arXiv preprint](https://arxiv.org/abs/2301.02785)):
+A paper on Duet has been accepted to HPCA 2023
+(**[arXiv preprint](https://arxiv.org/abs/2301.02785)**):
 
 ```
 Ang Li, August Ning, and David Wentzlaff.
